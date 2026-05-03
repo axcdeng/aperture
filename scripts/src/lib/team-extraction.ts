@@ -1,7 +1,11 @@
 import type { ChannelType } from './channels';
 
 const PRIMARY_RE = /\b\d{1,5}[A-Z]\b/g;
-const ORG_FALLBACK_RE = /\b\d{1,5}\b/g;
+// Bare-digit fallback: 3–5 digits only. The spec allowed 1–5 but in practice
+// 1–2 digit bare numbers ("4", "10", "v2") are virtually all noise — real
+// VEX teams of those sizes always carry a letter suffix and are caught by
+// the primary regex.
+const ORG_FALLBACK_RE = /\b\d{3,5}\b/g;
 
 export interface ExtractContext {
   channelType: ChannelType;
@@ -14,12 +18,23 @@ export interface ExtractContext {
   youtubeChannelName?: string;
 }
 
+function looksLikeTeam(token: string): boolean {
+  // Drop tokens whose numeric prefix is all zeros: "0", "0Z", "000", etc.
+  // No real VEX team number starts with zero (0Z would be team-zero).
+  const numericPart = token.match(/^\d+/)?.[0] ?? '';
+  if (numericPart === '' || /^0+$/.test(numericPart)) return false;
+  return true;
+}
+
 function uniqueMatches(re: RegExp, ...sources: (string | undefined)[]): string[] {
   const out = new Set<string>();
   for (const s of sources) {
     if (!s) continue;
     re.lastIndex = 0;
-    for (const m of s.matchAll(re)) out.add(m[0].toUpperCase());
+    for (const m of s.matchAll(re)) {
+      const tok = m[0].toUpperCase();
+      if (looksLikeTeam(tok)) out.add(tok);
+    }
   }
   return Array.from(out);
 }

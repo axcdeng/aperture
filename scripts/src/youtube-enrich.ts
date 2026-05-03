@@ -88,6 +88,19 @@ async function main() {
       const teamSlots = teams.length > 0 ? teams : [null];
 
       for (const team of teamSlots) {
+        // Upsert the team FIRST so the media FK doesn't violate.
+        if (team) {
+          await db
+            .insert(schema.teams)
+            .values({
+              teamNumber: team,
+              firstSeenAt: new Date(video.publishedAt),
+              lastSeenAt: new Date(video.publishedAt),
+              mediaCount: 0,
+            })
+            .onConflictDoNothing({ target: schema.teams.teamNumber });
+        }
+
         const id = nanoid(16);
         const inserted = await db
           .insert(schema.media)
@@ -118,18 +131,6 @@ async function main() {
           })
           .returning({ id: schema.media.id });
         if (inserted.length > 0) totalAdded++;
-
-        if (team) {
-          await db
-            .insert(schema.teams)
-            .values({
-              teamNumber: team,
-              firstSeenAt: new Date(video.publishedAt),
-              lastSeenAt: new Date(video.publishedAt),
-              mediaCount: 1,
-            })
-            .onConflictDoNothing({ target: schema.teams.teamNumber });
-        }
       }
 
       await db

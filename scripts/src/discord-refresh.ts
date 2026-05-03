@@ -1,25 +1,26 @@
 // Workflow B: Refresh signed Discord CDN URLs that are about to expire.
 //
-// Strategy:
-//   1. Find media rows where source='discord' AND deletedAt IS NULL AND
-//      cdn_expires_at < NOW() + 12h.
-//   2. Group by (channel_id, message_id). One Discord call per unique message.
-//   3. Update every row whose attachment_id appears in the fresh response.
-//   4. If the message returned 404, soft-delete every row tied to it.
-//   5. If a specific attachment is missing from a fresh message, soft-delete
-//      that single row.
+// Strategy: use Discord's POST /attachments/refresh-urls endpoint, which
+// accepts up to 50 URLs per call and returns freshly-signed counterparts.
+// This is the only viable approach for user-token clients — the per-message
+// lookup (GET /channels/.../messages/{id}) is bot-only and returns 403.
+//
+// We refresh both `cdn_url` (full-res) and `cdn_thumb_url` (proxy) per row.
+// Rows whose URLs don't come back in the response are left alone — we don't
+// soft-delete on a missing-from-response, since that signal is ambiguous
+// (could be expired link, could be transient API hiccup).
 
-import { and, eq, isNull, lt, sql } from 'drizzle-orm';
-import { db, schema } from './lib/db';
-import { fetchMessage, parseCdnExpiry } from './lib/discord-api';
+import { and, eq, isNull, lt } from 'drizzle-orm';
+import { db, schema, pool } from './lib/db';
+import { parseCdnExpiry, refreshAttachmentUrls } from './lib/discord-api';
 import { startSyncLog } from './lib/sync-log';
-import { pool } from './lib/db';
 import { GiveUpError, RateLimitError } from './lib/rate-limit';
+
+const BATCH = 50;
 
 async function main() {
   const log = await startSyncLog('discord_refresh');
   let refreshed = 0;
-  let softDeleted = 0;
   let errors = 0;
   const notes: string[] = [];
 
@@ -28,9 +29,8 @@ async function main() {
   const rows = await db
     .select({
       id: schema.media.id,
-      channelId: schema.media.discordChannelId,
-      messageId: schema.media.discordMessageId,
-      attachmentId: schema.media.discordAttachmentId,
+      cdnUrl: schema.media.cdnUrl,
+      cdnThumbUrl: schema.media.cdnThumbUrl,
     })
     .from(schema.media)
     .where(
@@ -43,104 +43,66 @@ async function main() {
 
   console.log(`[refresh] ${rows.length} candidate rows (expiring within 12h)`);
 
-  // Group by (channel_id, message_id)
-  const groups = new Map<string, { channelId: string; messageId: string; attachmentIds: string[] }>();
+  // Build a unique URL → row(s) map. The same URL can appear in multiple
+  // rows (e.g. multi-team reveals share an attachment).
+  const urlToRowIds = new Map<string, string[]>();
   for (const r of rows) {
-    if (!r.channelId || !r.messageId || !r.attachmentId) continue;
-    const key = `${r.channelId}::${r.messageId}`;
-    const existing = groups.get(key);
-    if (existing) existing.attachmentIds.push(r.attachmentId);
-    else
-      groups.set(key, {
-        channelId: r.channelId,
-        messageId: r.messageId,
-        attachmentIds: [r.attachmentId],
-      });
+    for (const u of [r.cdnUrl, r.cdnThumbUrl]) {
+      if (!u) continue;
+      const arr = urlToRowIds.get(u) ?? [];
+      arr.push(r.id);
+      urlToRowIds.set(u, arr);
+    }
   }
 
-  console.log(`[refresh] ${groups.size} unique messages to fetch`);
+  const allUrls = Array.from(urlToRowIds.keys());
+  console.log(`[refresh] ${allUrls.length} unique URLs to refresh`);
 
-  for (const { channelId, messageId, attachmentIds } of groups.values()) {
+  for (let i = 0; i < allUrls.length; i += BATCH) {
+    const slice = allUrls.slice(i, i + BATCH);
+    let map: Map<string, string>;
     try {
-      const msg = await fetchMessage(channelId, messageId);
-
-      if (!msg) {
-        // Message was deleted from Discord. Soft-delete all rows tied to it.
-        const result = await db
-          .update(schema.media)
-          .set({ deletedAt: new Date() })
-          .where(
-            and(
-              eq(schema.media.discordChannelId, channelId),
-              eq(schema.media.discordMessageId, messageId),
-              isNull(schema.media.deletedAt),
-            ),
-          )
-          .returning({ id: schema.media.id });
-        softDeleted += result.length;
-        console.log(`[refresh] message ${messageId} 404 — soft-deleted ${result.length} rows`);
-        continue;
-      }
-
-      const freshById = new Map(msg.attachments.map((a) => [a.id, a]));
-      for (const attId of attachmentIds) {
-        const att = freshById.get(attId);
-        if (!att) {
-          // Attachment removed from message (rare). Soft-delete just this row.
-          const r = await db
-            .update(schema.media)
-            .set({ deletedAt: new Date() })
-            .where(
-              and(
-                eq(schema.media.discordChannelId, channelId),
-                eq(schema.media.discordMessageId, messageId),
-                eq(schema.media.discordAttachmentId, attId),
-                isNull(schema.media.deletedAt),
-              ),
-            )
-            .returning({ id: schema.media.id });
-          softDeleted += r.length;
-          continue;
-        }
-
-        const expiresAt = parseCdnExpiry(att.url);
-        const r = await db
-          .update(schema.media)
-          .set({
-            cdnUrl: att.url,
-            cdnThumbUrl: att.proxy_url ?? att.url,
-            cdnExpiresAt: expiresAt,
-          })
-          .where(
-            and(
-              eq(schema.media.discordChannelId, channelId),
-              eq(schema.media.discordMessageId, messageId),
-              eq(schema.media.discordAttachmentId, attId),
-              isNull(schema.media.deletedAt),
-            ),
-          )
-          .returning({ id: schema.media.id });
-        refreshed += r.length;
-      }
+      map = await refreshAttachmentUrls(slice);
     } catch (e) {
       errors++;
       if (e instanceof RateLimitError) {
-        notes.push(`rate-limited at ${messageId}: ${e.message}`);
-        console.warn(`[refresh] rate-limited at ${messageId}, stopping early.`);
+        notes.push(`rate-limited at batch ${i}`);
+        console.warn('[refresh] rate-limited, stopping early.');
         break;
       }
       const msg = e instanceof GiveUpError ? e.message : (e as Error).message ?? String(e);
-      console.error(`[refresh] error refreshing ${messageId}: ${msg}`);
-      notes.push(`err ${messageId}: ${msg.slice(0, 80)}`);
+      console.error(`[refresh] batch ${i} error: ${msg}`);
+      notes.push(`batch err: ${msg.slice(0, 80)}`);
+      continue;
+    }
+
+    for (const [originalUrl, freshUrl] of map.entries()) {
+      const expires = parseCdnExpiry(freshUrl);
+      // Update any column that currently holds the original URL.
+      const r1 = await db
+        .update(schema.media)
+        .set({ cdnUrl: freshUrl, cdnExpiresAt: expires })
+        .where(
+          and(eq(schema.media.cdnUrl, originalUrl), isNull(schema.media.deletedAt)),
+        )
+        .returning({ id: schema.media.id });
+      const r2 = await db
+        .update(schema.media)
+        .set({ cdnThumbUrl: freshUrl })
+        .where(
+          and(eq(schema.media.cdnThumbUrl, originalUrl), isNull(schema.media.deletedAt)),
+        )
+        .returning({ id: schema.media.id });
+      refreshed += r1.length + r2.length;
     }
   }
 
   await log.finish({
     itemsRefreshed: refreshed,
     errors,
-    notes: `refreshed=${refreshed} softDeleted=${softDeleted} ${notes.join(' | ')}`.slice(0, 1000),
+    notes: `refreshed=${refreshed} ${notes.join(' | ')}`.slice(0, 1000),
   });
-  console.log(`[refresh] DONE. refreshed=${refreshed} softDeleted=${softDeleted} errors=${errors}`);
+  console.log(`[refresh] DONE. refreshed=${refreshed} errors=${errors}`);
   await pool.end();
   process.exit(errors > 0 ? 1 : 0);
 }
@@ -150,6 +112,3 @@ main().catch(async (err) => {
   await pool.end().catch(() => {});
   process.exit(1);
 });
-
-// Silence unused-import lint
-void sql;

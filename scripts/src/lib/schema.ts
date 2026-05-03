@@ -1,4 +1,4 @@
-// KEEP IN SYNC with /scripts/src/lib/schema.ts.
+// KEEP IN SYNC with /web/lib/db/schema.ts.
 // /scripts and /web each have their own drizzle-orm install, so the schema
 // must be defined inside whichever package is using it — sharing across
 // packages causes Symbol-mismatch failures at runtime. When you change one

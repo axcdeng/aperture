@@ -179,19 +179,18 @@ export async function searchTeams(query: string, limit = 10): Promise<SearchSugg
   const rows = await db
     .select({
       team: schema.teams,
-      contentCount: sql<number>`(
-        select count(*) from ${schema.media}
-        where ${schema.media.teamNumber} = ${schema.teams.teamNumber}
-        and ${schema.media.deletedAt} is null
-      )`.as('content_count'),
-      // Sort: prefix match on team_number first, then alphabetical
-      prefixRank: sql<number>`case when ${schema.teams.teamNumber} ilike ${q + '%'} then 0 else 1 end`.as(
-        'prefix_rank',
+      contentCount: sql<number>`count(${schema.media.id}) filter (where ${schema.media.deletedAt} is null)`.as(
+        'content_count',
       ),
     })
     .from(schema.teams)
+    .leftJoin(schema.media, eq(schema.media.teamNumber, schema.teams.teamNumber))
     .where(or(ilike(schema.teams.teamNumber, like), ilike(schema.teams.organization, like)))
-    .orderBy(sql`prefix_rank asc`, schema.teams.teamNumber)
+    .groupBy(schema.teams.teamNumber)
+    .orderBy(
+      sql`case when ${schema.teams.teamNumber} ilike ${q + '%'} then 0 else 1 end`,
+      schema.teams.teamNumber,
+    )
     .limit(limit);
 
   return rows.map((r) => ({
@@ -296,7 +295,7 @@ export async function getMostActiveTeams(
   const rows = await db
     .select({
       team: schema.teams,
-      count: count(schema.media.id).as('media_count'),
+      count: count(schema.media.id).as('active_count'),
     })
     .from(schema.media)
     .innerJoin(schema.teams, eq(schema.media.teamNumber, schema.teams.teamNumber))
@@ -307,7 +306,7 @@ export async function getMostActiveTeams(
       ),
     )
     .groupBy(schema.teams.teamNumber)
-    .orderBy(desc(sql`media_count`))
+    .orderBy(desc(sql`active_count`))
     .limit(limit);
 
   return rows.map((r) => ({ team: rowToTeam(r.team), count: Number(r.count) }));
@@ -344,6 +343,24 @@ export async function getMediaItem(id: string): Promise<MediaItem | null> {
     .where(and(eq(schema.media.id, id), isNull(schema.media.deletedAt)))
     .limit(1);
   return row ? rowToMediaItem(row) : null;
+}
+
+// ---------------------------------------------------------------------------
+// listTeams — used by the browse page so the right-rail TeamDetailPanel
+// has metadata for any selected card. Not part of the original spec but
+// added so the feed UI can hydrate selections without re-querying per click.
+// ---------------------------------------------------------------------------
+export async function listTeams(limit = 1000): Promise<Team[]> {
+  if (shouldUseSeed()) {
+    return SEED_TEAMS.slice(0, limit);
+  }
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(schema.teams)
+    .orderBy(desc(schema.teams.lastSeenAt))
+    .limit(limit);
+  return rows.map(rowToTeam);
 }
 
 // ---------------------------------------------------------------------------

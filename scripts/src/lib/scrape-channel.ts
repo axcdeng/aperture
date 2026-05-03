@@ -170,6 +170,10 @@ async function processMessage(
     const groupId = teamsForMessage.length > 1 ? nanoid(12) : null;
 
     for (const team of teams) {
+      // Upsert the team FIRST so the media foreign key never references a
+      // nonexistent team_number.
+      if (team) await touchTeam(team, msg.timestamp);
+
       const id = nanoid(16);
       const inserted = await db
         .insert(schema.media)
@@ -205,8 +209,6 @@ async function processMessage(
         })
         .returning({ id: schema.media.id });
       if (inserted.length > 0) itemsAdded++;
-
-      if (team) await touchTeam(team, msg.timestamp);
     }
   }
 

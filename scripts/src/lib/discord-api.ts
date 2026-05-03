@@ -18,6 +18,8 @@ interface DiscordReqOpts {
   query?: Record<string, string | undefined>;
   // If true, treat 404 as a normal "not found" return value instead of throwing.
   allow404?: boolean;
+  method?: 'GET' | 'POST';
+  body?: unknown;
 }
 
 export interface DiscordAttachment {
@@ -69,13 +71,20 @@ async function discordRequest(
       const qs = params.toString();
       if (qs) url += (url.includes('?') ? '&' : '?') + qs;
     }
+    const headers: Record<string, string> = {
+      Authorization: authHeader(),
+      Accept: 'application/json',
+      'User-Agent': 'VEXScout/0.1 (+https://github.com/your-org/vex-scout)',
+    };
+    let bodyInit: string | undefined;
+    if (opts.body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      bodyInit = JSON.stringify(opts.body);
+    }
     const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Authorization: authHeader(),
-        Accept: 'application/json',
-        'User-Agent': 'VEXScout/0.1 (+https://github.com/your-org/vex-scout)',
-      },
+      method: opts.method ?? 'GET',
+      headers,
+      body: bodyInit,
     });
     await sleep(DEFAULT_INTERCALL_DELAY_MS);
 
@@ -139,6 +148,31 @@ export async function fetchMessage(
     allow404: true,
   })) as DiscordMessage | null;
   return result;
+}
+
+/**
+ * POST /attachments/refresh-urls
+ *
+ * Sends up to 50 expiring CDN URLs and gets back their newly-signed
+ * counterparts. Works for both bot AND user tokens (unlike the single-message
+ * endpoint, which is bot-only). Body shape:
+ *   { "attachment_urls": ["https://cdn.discordapp.com/...", ...] }
+ * Response shape:
+ *   { "refreshed_urls": [{ "original": "...", "refreshed": "..." }, ...] }
+ */
+export async function refreshAttachmentUrls(
+  urls: string[],
+): Promise<Map<string, string>> {
+  if (urls.length === 0) return new Map();
+  const result = (await discordRequest('/attachments/refresh-urls', {
+    method: 'POST',
+    body: { attachment_urls: urls },
+  })) as { refreshed_urls?: { original: string; refreshed: string }[] };
+  const out = new Map<string, string>();
+  for (const r of result.refreshed_urls ?? []) {
+    if (r.original && r.refreshed) out.set(r.original, r.refreshed);
+  }
+  return out;
 }
 
 /**

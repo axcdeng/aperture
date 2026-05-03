@@ -7,6 +7,8 @@ import { StatRow } from '@/components/vex/stat-row';
 import { getMostActiveTeams, getRecentMedia, getStats } from '@/lib/data';
 import { formatRelativeTime } from '@/lib/utils';
 
+export const revalidate = 60;
+
 export default async function HomePage() {
   const [recent, active, stats] = await Promise.all([
     getRecentMedia(6),

@@ -1,6 +1,4 @@
 // Hardcoded Discord channel config.
-// Fill the <TODO_CHANNEL_ID> placeholders by following SETUP.md → step 6.
-//
 // `type` controls how team numbers are extracted from each channel's content.
 // See ./team-extraction.ts for the priority chain.
 
@@ -16,26 +14,34 @@ export interface ChannelConfig {
 
 export const CHANNELS: ChannelConfig[] = [
   {
-    id: '<TODO_CHANNEL_ID>',
+    id: '358443347515539457', // VEX Robotics Competition guild · #reveals
     name: 'vex-reveals',
-    guild: 'VEX Robotics Official',
+    guild: 'VEX Robotics Competition',
     type: 'admin-reposted-youtube',
     description:
       "Admin-curated reveals channel. Reveals are posted as YouTube links by mods, not by the teams themselves. Don't trust the Discord poster's nickname — check video title and description instead.",
   },
   {
-    id: '<TODO_CHANNEL_ID>',
+    id: '900591595315929098', // VEX CAD guild · #robots
     name: 'vex-cad-robots',
     guild: 'VEX CAD',
     type: 'self-posted',
     description: "Teams post their own CAD renders. Poster's nickname usually contains team number.",
   },
   {
-    id: '<TODO_CHANNEL_ID>',
+    id: '703422828917162014', // VEX CAD guild · #renders
+    name: 'vex-cad-renders',
+    guild: 'VEX CAD',
+    type: 'self-posted',
+    description: "Teams post additional CAD render screenshots. Same per-poster heuristics as #robots.",
+  },
+  {
+    id: '1273071672760467623', // Robolytics guild · #robot-ratings — currently 403 for throwaway
     name: 'robolytics-robots',
     guild: 'Robolytics',
     type: 'self-posted',
-    description: "Teams post their own robot photos/videos. Poster's nickname usually contains team number.",
+    description:
+      "Teams post their own robot photos/videos. NOTE: this channel may require a role in the Robolytics server. If the scraper logs 403 here, ask a Robolytics admin to grant the throwaway read access (or remove this entry).",
   },
 ];
 
