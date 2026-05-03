@@ -1,0 +1,28 @@
+{
+  "name": "vexscout-scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "scrape": "tsx src/discord-scrape.ts",
+    "refresh": "tsx src/discord-refresh.ts",
+    "enrich": "tsx src/youtube-enrich.ts",
+    "backfill": "tsx src/backfill.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.20.0",
+    "nanoid": "^5.1.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.18.0",
+    "@types/pg": "^8.20.0",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.20.0",
+    "typescript": "^5.7.0"
+  }
+}
