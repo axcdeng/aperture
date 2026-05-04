@@ -54,7 +54,7 @@ async function main() {
       await saveCursor(channel, result, 'backward');
       totalAdded += result.itemsAdded;
       totalQueued += result.youtubeQueued;
-      if (result.status !== 'ok') totalErrors++;
+      if (result.status !== 'ok' && result.status !== 'no_access') totalErrors++;
       notes.push(
         `#${channel.name}: msgs=${result.messagesProcessed} added=${result.itemsAdded} ytq=${result.youtubeQueued} status=${result.status} oldest=${result.lowestMessageId ?? '—'}`,
       );

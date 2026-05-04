@@ -1,4 +1,10 @@
-import { DEFAULT_INTERCALL_DELAY_MS, GiveUpError, RateLimitError, sleep } from './rate-limit';
+import {
+  DEFAULT_INTERCALL_DELAY_MS,
+  GiveUpError,
+  NoAccessError,
+  RateLimitError,
+  sleep,
+} from './rate-limit';
 
 const DISCORD_BASE = 'https://discord.com/api/v10';
 const MAX_429_RETRIES = 3;
@@ -106,6 +112,16 @@ async function discordRequest(
     }
 
     if (res.status === 404 && opts.allow404) return null;
+
+    if (res.status === 401) {
+      const text = await res.text().catch(() => '<no body>');
+      throw new GiveUpError(`Discord 401 (token invalid/expired) on ${path}: ${text.slice(0, 300)}`);
+    }
+
+    if (res.status === 403) {
+      const text = await res.text().catch(() => '<no body>');
+      throw new NoAccessError(`Discord 403 on ${path}: ${text.slice(0, 300)}`);
+    }
 
     if (!res.ok) {
       const text = await res.text().catch(() => '<no body>');

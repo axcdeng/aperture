@@ -19,3 +19,13 @@ export class GiveUpError extends Error {
     this.name = 'GiveUpError';
   }
 }
+
+// Distinguishes "we don't have permission to read this resource" from a real
+// API failure. Used to mark a channel as skipped without failing the whole
+// workflow run (e.g. role-gated Discord channels).
+export class NoAccessError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NoAccessError';
+  }
+}

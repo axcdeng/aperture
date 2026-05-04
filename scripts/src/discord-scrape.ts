@@ -41,7 +41,10 @@ async function main() {
       await saveCursor(channel, result, 'forward');
       totalAdded += result.itemsAdded;
       totalQueued += result.youtubeQueued;
-      if (result.status !== 'ok') totalErrors++;
+      // 'no_access' is an expected, non-fatal state (channel is role-gated for
+      // the throwaway). Don't count it toward totalErrors so the workflow run
+      // stays green when only that channel is blocked.
+      if (result.status !== 'ok' && result.status !== 'no_access') totalErrors++;
       notes.push(
         `#${channel.name}: msgs=${result.messagesProcessed} added=${result.itemsAdded} ytq=${result.youtubeQueued} status=${result.status}${result.error ? ' err=' + result.error.slice(0, 80) : ''}`,
       );

@@ -13,7 +13,7 @@ import {
 } from './discord-api';
 import { extractTeams, extractYoutubeVideoIds } from './team-extraction';
 import { seasonForDate } from './seasons';
-import { GiveUpError, RateLimitError } from './rate-limit';
+import { GiveUpError, NoAccessError, RateLimitError } from './rate-limit';
 import type { ChannelConfig } from './channels';
 
 export interface ScrapeResult {
@@ -21,7 +21,7 @@ export interface ScrapeResult {
   messagesProcessed: number;
   itemsAdded: number;
   youtubeQueued: number;
-  status: 'ok' | 'rate_limited' | 'error';
+  status: 'ok' | 'rate_limited' | 'error' | 'no_access';
   error?: string;
   highestMessageId?: string;
   lowestMessageId?: string;
@@ -111,6 +111,19 @@ export async function scrapeChannel(
         itemsAdded,
         youtubeQueued,
         status: 'rate_limited',
+        error: e.message,
+        highestMessageId,
+        lowestMessageId,
+      };
+    }
+    if (e instanceof NoAccessError) {
+      console.warn(`[scrape] no access to ${channel.name} — skipping (grant the throwaway a role to enable)`);
+      return {
+        channel,
+        messagesProcessed: processed,
+        itemsAdded,
+        youtubeQueued,
+        status: 'no_access',
         error: e.message,
         highestMessageId,
         lowestMessageId,
