@@ -35,6 +35,25 @@ function shouldUseSeed(): boolean {
   return false;
 }
 
+// Discord messages often contain raw URLs, mention tokens like <@123>, custom
+// emoji like <:name:123>, and channel refs <#123>. Stripping these gives us a
+// readable title; the original text stays in `description` for anyone who
+// wants the source.
+function cleanTitle(raw: string | null | undefined, max = 120): string | undefined {
+  if (!raw) return undefined;
+  const cleaned = raw
+    .replace(/<a?:[A-Za-z0-9_~]+:\d+>/g, '') // custom emoji
+    .replace(/<@!?\d+>/g, '')                // user mentions
+    .replace(/<#\d+>/g, '')                  // channel mentions
+    .replace(/<@&\d+>/g, '')                 // role mentions
+    .replace(/<https?:\/\/\S+>/g, '')        // bracketed URLs
+    .replace(/https?:\/\/\S+/g, '')          // bare URLs
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return undefined;
+  return cleaned.length > max ? cleaned.slice(0, max - 1).trim() + '…' : cleaned;
+}
+
 function rowToMediaItem(m: DbMedia): MediaItem {
   // Build the URL the frontend should render. For Discord, cdnUrl/cdnThumbUrl
   // are signed CDN URLs (~24h lifetime). For YouTube, we synthesize embed URLs
@@ -60,7 +79,7 @@ function rowToMediaItem(m: DbMedia): MediaItem {
     seasonId: m.seasonId as SeasonId,
     thumbnailUrl,
     fullUrl,
-    title: m.title ?? undefined,
+    title: cleanTitle(m.title),
     description: m.description ?? undefined,
     width: m.width ?? undefined,
     height: m.height ?? undefined,

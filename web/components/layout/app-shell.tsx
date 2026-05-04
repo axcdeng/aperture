@@ -98,9 +98,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Keep shell present even on detail pages.
 
   return (
-    <div className="flex min-h-screen w-full">
-      {/* Sidebar */}
-      <aside className="hidden w-64 shrink-0 border-r border-border bg-background lg:flex lg:flex-col">
+    <div className="flex w-full">
+      {/* Sidebar — sticky so it stays put when the main column scrolls. */}
+      <aside className="hidden w-64 shrink-0 border-r border-border bg-background lg:sticky lg:top-0 lg:h-screen lg:flex lg:flex-col">
         <div className="flex h-14 items-center gap-2.5 border-b border-border px-4">
           <Logo />
           <span className="font-semibold tracking-tight">VEX Scout</span>

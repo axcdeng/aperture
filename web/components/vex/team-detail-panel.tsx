@@ -96,7 +96,7 @@ export function TeamDetailPanel({
   return (
     <aside
       ref={asideRef}
-      className="relative hidden w-full shrink-0 border-l border-border bg-background xl:flex xl:flex-col"
+      className="relative hidden w-full shrink-0 border-l border-border bg-background xl:sticky xl:top-0 xl:h-screen xl:flex xl:flex-col"
       style={{ width: `${width}px` }}
     >
       <button

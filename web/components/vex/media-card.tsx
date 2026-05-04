@@ -33,7 +33,7 @@ export function MediaCard({
       <div className="relative aspect-[4/3] overflow-hidden rounded-t-lg bg-[#0d0d0d]">
         <Image
           src={item.thumbnailUrl}
-          alt={item.title ?? 'Media thumbnail'}
+          alt={item.teamNumber ? `Team ${item.teamNumber} ${item.contentType}` : 'Untagged media'}
           fill
           sizes="(max-width: 768px) 100vw, 33vw"
           className="object-cover"

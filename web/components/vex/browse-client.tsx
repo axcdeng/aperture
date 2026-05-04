@@ -9,7 +9,8 @@ import { MediaCard } from './media-card';
 import { TeamDetailPanel } from './team-detail-panel';
 import { Lightbox } from './lightbox';
 import { EmptyState } from './empty-state';
-import { Loader2 } from 'lucide-react';
+import { ChevronLeft, Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 const PAGE_SIZE = 12;
 
@@ -34,6 +35,7 @@ export function BrowseClient({
   const [lightboxId, setLightboxId] = useState<string | null>(null);
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [page, setPage] = useState(1);
+  const [panelOpen, setPanelOpen] = useState(true);
 
   const filtered = useMemo(() => {
     return allItems.filter((m) => {
@@ -156,15 +158,29 @@ export function BrowseClient({
         </div>
       </section>
 
-      {selectedTeam ? (
+      {selectedTeam && panelOpen ? (
         <TeamDetailPanel
           team={selectedTeam}
           media={allItems
             .filter((m) => m.teamNumber === selectedTeam.number)
             .sort((a, b) => new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime())}
           selectedMedia={selectedMedia}
-          onClose={() => setSelectedId(null)}
+          onClose={() => setPanelOpen(false)}
         />
+      ) : null}
+
+      {/* Re-open tab when the panel is hidden. Sticky to the right edge. */}
+      {selectedTeam && !panelOpen ? (
+        <button
+          onClick={() => setPanelOpen(true)}
+          aria-label="Show team details"
+          className={cn(
+            'hidden xl:sticky xl:top-0 xl:flex',
+            'h-screen w-7 shrink-0 items-center justify-center border-l border-border bg-background text-muted hover:bg-surface hover:text-foreground transition-colors',
+          )}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
       ) : null}
 
       <Lightbox
