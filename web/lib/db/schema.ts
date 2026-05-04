@@ -92,6 +92,10 @@ export const scrapeState = pgTable('scrape_state', {
   channelId: text('channel_id').primaryKey(),
   channelName: text('channel_name').notNull(),
   lastSyncedMessageId: text('last_synced_message_id'),
+  // Lowest message ID the deep-backfill walker has processed for this
+  // channel. Independent of the forward cursor above. Used to resume a
+  // partial backfill (e.g. one that hit GitHub Actions' 6h timeout).
+  backfillCursor: text('backfill_cursor'),
   lastRunAt: timestamp('last_run_at', { withTimezone: true }),
   lastRunStatus: text('last_run_status'), // 'ok' | 'error' | 'rate_limited' | 'pending'
   lastRunError: text('last_run_error'),

@@ -1,0 +1,61 @@
+name: deep-backfill
+
+# Manual-only. Walks each channel's history backward to the floor date,
+# checkpointing after every page so the next run resumes precisely from
+# where this one stopped — even if the 6h GitHub Actions limit kills the
+# job mid-walk. Just re-run the workflow until each channel reports
+# stop=floor / floor_crossed / channel_exhausted in the logs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      stop_date:
+        description: 'ISO date floor (YYYY-MM-DD). Walker stops at this date.'
+        required: false
+        default: '2023-01-01'
+      max_runtime_minutes:
+        description: 'Soft budget. Bails out after this many minutes (≤ 350 to leave room under the 360m hard limit).'
+        required: false
+        default: '340'
+      start_before:
+        description: 'Optional: snowflake to start from (overrides per-channel resume cursor).'
+        required: false
+        default: ''
+      human_base_ms:
+        description: 'Average ms between Discord requests (jitter applied).'
+        required: false
+        default: '1000'
+
+concurrency:
+  group: deep-backfill
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    # Hard cap. Must be < 360. The script's MAX_RUNTIME_MINUTES bails out
+    # ~10–20 min sooner so we get a graceful exit + final log line.
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: scripts/package-lock.json
+      - name: Install
+        working-directory: scripts
+        run: npm ci || npm install
+      - name: Deep backfill
+        working-directory: scripts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+          BACKFILL_STOP_DATE: ${{ inputs.stop_date }}
+          MAX_RUNTIME_MINUTES: ${{ inputs.max_runtime_minutes }}
+          BACKFILL_START_BEFORE: ${{ inputs.start_before }}
+          HUMAN_BASE_MS: ${{ inputs.human_base_ms }}
+        run: npm run deep-backfill

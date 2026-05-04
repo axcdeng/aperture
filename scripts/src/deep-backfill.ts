@@ -1,178 +1,181 @@
 // Deep backfill: for each configured channel, paginate backwards through
-// history until the next page would be older than a date floor (default
-// 2023-01-01 UTC). Designed to be run ONCE locally — it can take hours
-// because of human-paced delays. Resume-safe: every batch commits its rows
-// before moving to the next.
+// history until either the configured floor date is reached OR the runtime
+// budget is exhausted (designed to fit inside GitHub Actions' 6h job
+// timeout). Every page is committed as it completes, and the channel's
+// progress is persisted in scrape_state.backfill_cursor — so re-running
+// the workflow picks up exactly where the previous run left off.
 //
-// Run:
-//   cd scripts
-//   BACKFILL_STOP_DATE=2023-01-01 npm run deep-backfill
-//
-// Optional env:
-//   BACKFILL_STOP_DATE     ISO date the walker stops at (default 2023-01-01)
-//   BACKFILL_START_BEFORE  optional snowflake to start from per channel.
-//                          If unset, starts from "now" (current time).
-//   MAX_PAGES_PER_CHANNEL  safety cap — pages, not messages (default 1000)
-//
-// You can interrupt with Ctrl-C; the next run resumes from where the
-// channel's oldest-seen message left off (we read scrape_state internally
-// and pick up there if BACKFILL_START_BEFORE isn't set).
+// Tunables (env):
+//   BACKFILL_STOP_DATE       ISO date floor (default 2023-01-01)
+//   BACKFILL_START_BEFORE    optional snowflake to seed channels with no
+//                            existing backfill_cursor (default: now)
+//   MAX_PAGES_PER_CHANNEL    cap pages per channel per run (default 1000)
+//   MAX_RUNTIME_MINUTES      bail out after this many minutes elapsed
+//                            (default 340 — leaves 20m of buffer under
+//                            GitHub Actions' 360m limit)
+//   HUMAN_BASE_MS, HUMAN_JITTER_MS, etc. — see rate-limit.ts
 
-import { configuredChannels, isPlaceholder, CHANNELS } from './lib/channels';
+import { eq } from 'drizzle-orm';
+import { configuredChannels, isPlaceholder, CHANNELS, type ChannelConfig } from './lib/channels';
 import { ensureScrapeStateRow, scrapeChannel } from './lib/scrape-channel';
 import { startSyncLog } from './lib/sync-log';
 import { dateToSnowflake, snowflakeToDate } from './lib/snowflake';
 import { db, schema, pool } from './lib/db';
-import { eq } from 'drizzle-orm';
 
-interface ChannelProgress {
-  oldestSnowflake: string | null;
-}
+const STOP_DATE = new Date(process.env.BACKFILL_STOP_DATE ?? '2023-01-01');
+const STOP_SNOWFLAKE = dateToSnowflake(STOP_DATE);
+const MAX_PAGES = Math.max(1, parseInt(process.env.MAX_PAGES_PER_CHANNEL ?? '1000', 10));
+const MAX_RUNTIME_MS = Math.max(60, parseInt(process.env.MAX_RUNTIME_MINUTES ?? '340', 10)) * 60_000;
+const START_BEFORE_OVERRIDE = process.env.BACKFILL_START_BEFORE ?? null;
 
-// Track per-channel progress in memory only — DB persistence isn't needed
-// since we reread the channel's oldest scraped row on each fresh start.
-async function getResumeSnowflake(channelId: string): Promise<string | null> {
-  // The smallest discord_message_id we've already inserted for this channel.
-  // If found, we resume `before` that snowflake to keep walking older.
-  const row = await db
+const startedAt = Date.now();
+function elapsedMs() { return Date.now() - startedAt; }
+function elapsedMin() { return Math.floor(elapsedMs() / 60_000); }
+function budgetExpired() { return elapsedMs() >= MAX_RUNTIME_MS; }
+
+async function loadCursor(channel: ChannelConfig): Promise<string | null> {
+  // 1) explicit env override
+  if (START_BEFORE_OVERRIDE) return START_BEFORE_OVERRIDE;
+  // 2) prior persisted backfill cursor
+  const [row] = await db
+    .select({ cursor: schema.scrapeState.backfillCursor })
+    .from(schema.scrapeState)
+    .where(eq(schema.scrapeState.channelId, channel.id))
+    .limit(1);
+  if (row?.cursor) return row.cursor;
+  // 3) fall back to oldest known media row for this channel — handles
+  //    channels that were partially backfilled before this column existed.
+  const oldest = await db
     .select({ id: schema.media.discordMessageId })
     .from(schema.media)
-    .where(eq(schema.media.discordChannelId, channelId))
+    .where(eq(schema.media.discordChannelId, channel.id))
     .orderBy(schema.media.discordMessageId)
     .limit(1);
-  return row[0]?.id ?? null;
+  if (oldest[0]?.id) return oldest[0].id;
+  // 4) brand-new channel — start at "now" and walk back
+  return dateToSnowflake(new Date());
+}
+
+async function saveCursor(channel: ChannelConfig, cursor: string): Promise<void> {
+  await db
+    .update(schema.scrapeState)
+    .set({ backfillCursor: cursor, lastRunAt: new Date() })
+    .where(eq(schema.scrapeState.channelId, channel.id));
 }
 
 async function main() {
-  const stopDateStr = process.env.BACKFILL_STOP_DATE ?? '2023-01-01';
-  const stopDate = new Date(stopDateStr);
-  if (Number.isNaN(stopDate.getTime())) {
-    console.error(`BACKFILL_STOP_DATE is not a valid date: ${stopDateStr}`);
+  if (Number.isNaN(STOP_DATE.getTime())) {
+    console.error(`BACKFILL_STOP_DATE is not a valid date: ${process.env.BACKFILL_STOP_DATE}`);
     await pool.end();
     process.exit(2);
   }
-  const stopSnowflake = dateToSnowflake(stopDate);
-  const maxPages = parseInt(process.env.MAX_PAGES_PER_CHANNEL ?? '1000', 10);
-  const startBeforeOverride = process.env.BACKFILL_START_BEFORE;
 
-  console.log(`[deep-backfill] floor = ${stopDate.toISOString()} (snowflake ${stopSnowflake})`);
-  console.log(`[deep-backfill] max pages per channel = ${maxPages}`);
+  console.log(`[deep-backfill] floor       = ${STOP_DATE.toISOString()} (snowflake ${STOP_SNOWFLAKE})`);
+  console.log(`[deep-backfill] max pages   = ${MAX_PAGES} per channel`);
+  console.log(`[deep-backfill] max runtime = ${MAX_RUNTIME_MS / 60_000} min`);
 
   const placeholders = CHANNELS.filter((c) => isPlaceholder(c.id));
   if (placeholders.length > 0) {
-    console.warn(
-      `[deep-backfill] skipping unconfigured: ${placeholders.map((c) => c.name).join(', ')}`,
-    );
+    console.warn(`[deep-backfill] skipping unconfigured: ${placeholders.map((c) => c.name).join(', ')}`);
   }
   const channels = configuredChannels();
   if (channels.length === 0) {
-    console.error('[deep-backfill] No channels configured.');
+    console.error('[deep-backfill] no channels configured');
     await pool.end();
     process.exit(0);
   }
 
-  const log = await startSyncLog('backfill', `deep until ${stopDate.toISOString()}`);
+  const log = await startSyncLog('backfill', `deep_until=${STOP_DATE.toISOString()}`);
   let grandAdded = 0;
   let grandQueued = 0;
   let grandErrors = 0;
   const notes: string[] = [];
 
   for (const channel of channels) {
+    if (budgetExpired()) {
+      notes.push(`#${channel.name}: skipped (runtime budget hit before start)`);
+      continue;
+    }
+
     await ensureScrapeStateRow(channel);
-
-    // Pick a starting "before" cursor: explicit override → channel's
-    // oldest stored message → "now" (i.e. start from the most recent message).
-    let cursor: string | null = startBeforeOverride ?? null;
-    if (!cursor) cursor = await getResumeSnowflake(channel.id);
-    if (!cursor) cursor = dateToSnowflake(new Date());
-
-    const startedAt = snowflakeToDate(cursor);
+    let cursor = await loadCursor(channel);
+    const startCursorDate = cursor ? snowflakeToDate(cursor) : null;
     console.log(
-      `[deep-backfill] === #${channel.name} starting at cursor=${cursor} (≈${startedAt.toISOString()})`,
+      `[deep-backfill] === #${channel.name} resume cursor=${cursor} (≈${startCursorDate?.toISOString() ?? 'unknown'})`,
     );
 
-    let pagesThisChannel = 0;
-    let addedThisChannel = 0;
-    let queuedThisChannel = 0;
+    let pages = 0;
+    let added = 0;
+    let queued = 0;
+    let stopReason = 'budget';
 
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      if (pagesThisChannel >= maxPages) {
-        notes.push(`#${channel.name}: hit MAX_PAGES_PER_CHANNEL (${maxPages})`);
-        break;
-      }
-      // Refuse to fetch a page whose `before` cursor is already older than
-      // the floor — saves an API call and keeps the walker honest.
-      if (cursor && cursor <= stopSnowflake) {
-        notes.push(`#${channel.name}: cursor reached floor`);
-        break;
-      }
+    while (pages < MAX_PAGES) {
+      if (budgetExpired()) { stopReason = 'budget'; break; }
+      if (!cursor) { stopReason = 'no_cursor'; break; }
+      if (cursor <= STOP_SNOWFLAKE) { stopReason = 'floor'; break; }
 
       const result = await scrapeChannel(channel, {
-        before: cursor!,
-        // Process pages incrementally — 100 messages per scrapeChannel call
-        // (the inner loop's PAGE_SIZE) means we can checkpoint between
-        // batches and watch progress in real time.
+        before: cursor,
+        // Use 100 messages per inner-loop call so we checkpoint after every
+        // single Discord page. Fine-grained progress = clean resume.
         perRunMessageCap: 100,
       });
 
-      pagesThisChannel++;
-      addedThisChannel += result.itemsAdded;
-      queuedThisChannel += result.youtubeQueued;
+      pages++;
+      added += result.itemsAdded;
+      queued += result.youtubeQueued;
 
-      if (result.status === 'no_access') {
-        notes.push(`#${channel.name}: no_access — skipping`);
-        break;
+      if (result.status === 'no_access') { stopReason = 'no_access'; break; }
+      if (result.status === 'rate_limited') {
+        // The inner client already slept for retry_after. Re-run the same
+        // cursor next iteration; don't advance.
+        console.warn(`[deep-backfill] #${channel.name} rate-limited mid-page, retrying`);
+        continue;
       }
-      if (result.status !== 'ok' && result.status !== 'rate_limited') {
+      if (result.status === 'error') {
         grandErrors++;
-        notes.push(
-          `#${channel.name} page ${pagesThisChannel}: status=${result.status} ${result.error ?? ''}`,
-        );
+        notes.push(`#${channel.name} page ${pages}: error ${result.error?.slice(0, 80) ?? ''}`);
+        stopReason = 'error';
         break;
       }
-
       if (result.messagesProcessed === 0 || !result.lowestMessageId) {
-        notes.push(`#${channel.name}: reached oldest message in channel`);
-        break;
-      }
-
-      const oldestDate = snowflakeToDate(result.lowestMessageId);
-      console.log(
-        `[deep-backfill] #${channel.name} page ${pagesThisChannel}: msgs=${result.messagesProcessed} added=${result.itemsAdded} ytq=${result.youtubeQueued} oldest=${oldestDate.toISOString()}`,
-      );
-
-      if (oldestDate < stopDate) {
-        notes.push(`#${channel.name}: crossed floor at ${oldestDate.toISOString()}`);
+        stopReason = 'channel_exhausted';
         break;
       }
 
       cursor = result.lowestMessageId;
+      const oldestDate = snowflakeToDate(cursor);
+      // Persist after every page so a kill/timeout never loses progress.
+      await saveCursor(channel, cursor);
 
-      if (result.status === 'rate_limited') {
-        // scrapeChannel already slept inside its 429 path; back off another
-        // 30s here for good measure.
-        console.warn(`[deep-backfill] rate-limited on #${channel.name}, sleeping 30s`);
-        await new Promise((r) => setTimeout(r, 30000));
-      }
+      console.log(
+        `[deep-backfill] #${channel.name} page=${pages} added=${result.itemsAdded} ytq=${result.youtubeQueued} oldest=${oldestDate.toISOString()} elapsed=${elapsedMin()}m`,
+      );
+
+      if (oldestDate < STOP_DATE) { stopReason = 'floor_crossed'; break; }
     }
 
-    grandAdded += addedThisChannel;
-    grandQueued += queuedThisChannel;
+    grandAdded += added;
+    grandQueued += queued;
     notes.push(
-      `#${channel.name}: pages=${pagesThisChannel} added=${addedThisChannel} ytq=${queuedThisChannel}`,
+      `#${channel.name}: pages=${pages} added=${added} ytq=${queued} stop=${stopReason}`,
     );
   }
 
   await log.finish({
     itemsAdded: grandAdded,
     errors: grandErrors,
-    notes: `floor=${stopDate.toISOString()} | ${notes.join(' | ')}`.slice(0, 1000),
+    notes: `floor=${STOP_DATE.toISOString()} elapsed=${elapsedMin()}m | ${notes.join(' | ')}`.slice(
+      0,
+      1000,
+    ),
   });
   console.log(
-    `[deep-backfill] DONE. items_added=${grandAdded} youtube_queued=${grandQueued} errors=${grandErrors}`,
+    `[deep-backfill] DONE elapsed=${elapsedMin()}m added=${grandAdded} ytq=${grandQueued} errors=${grandErrors}`,
   );
   await pool.end();
+  // Exit 0 when we hit the runtime budget — that's a clean partial run, not
+  // a failure. The next workflow run will resume from the persisted cursor.
   process.exit(grandErrors > 0 ? 1 : 0);
 }
 

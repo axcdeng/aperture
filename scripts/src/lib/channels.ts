@@ -35,14 +35,17 @@ export const CHANNELS: ChannelConfig[] = [
     type: 'self-posted',
     description: "Teams post additional CAD render screenshots. Same per-poster heuristics as #robots.",
   },
-  {
-    id: '1273071672760467623', // Robolytics guild · #robot-ratings — currently 403 for throwaway
-    name: 'robolytics-robots',
-    guild: 'Robolytics',
-    type: 'self-posted',
-    description:
-      "Teams post their own robot photos/videos. NOTE: this channel may require a role in the Robolytics server. If the scraper logs 403 here, ask a Robolytics admin to grant the throwaway read access (or remove this entry).",
-  },
+  // ----------------------------------------------------------------------
+  // Disabled: throwaway lacks role/perms to read this channel. Restore once
+  // a Robolytics admin grants read access — no other code change required.
+  // ----------------------------------------------------------------------
+  // {
+  //   id: '1273071672760467623', // Robolytics guild · #robot-ratings
+  //   name: 'robolytics-robots',
+  //   guild: 'Robolytics',
+  //   type: 'self-posted',
+  //   description: "Teams post their own robot photos/videos.",
+  // },
 ];
 
 export function isPlaceholder(id: string): boolean {
