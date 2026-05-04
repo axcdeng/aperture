@@ -61,22 +61,12 @@ function firstHit(
  */
 export function extractTeams(ctx: ExtractContext): string[] {
   if (ctx.channelType === 'self-posted') {
-    // 1-3: primary regex on nickname → message → username
-    const primary = firstHit(
-      new RegExp(PRIMARY_RE.source, 'g'),
-      ctx.posterNickname,
-      ctx.messageContent,
-      ctx.posterUsername,
-    );
-    if (primary.length) return primary;
-    // 4: org fallback (bare digits) on the same fields
-    const fallback = firstHit(
-      new RegExp(ORG_FALLBACK_RE.source, 'g'),
-      ctx.posterNickname,
-      ctx.messageContent,
-      ctx.posterUsername,
-    );
-    return fallback;
+    // Self-posted channels: trust ONLY the poster's nickname. Message content
+    // is too noisy ("119 auto and driver" matches a digit-fallback even though
+    // the poster's actual team is in their nickname). Username is also too
+    // noisy — handles like "robotnerd42" would false-match. Empty result here
+    // is fine; the row is inserted as untagged and can be reviewed later.
+    return uniqueMatches(new RegExp(PRIMARY_RE.source, 'g'), ctx.posterNickname);
   }
 
   // admin-reposted-youtube

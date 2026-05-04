@@ -162,7 +162,15 @@ async function processMessage(
     return { itemsAdded: 0, youtubeQueued: 0 };
   }
 
-  const posterNickname = msg.member?.nick ?? msg.author.display_name ?? msg.author.global_name ?? null;
+  // Build a "nickname" by joining every user-presented identity field Discord
+  // returns: server nickname (member.nick), global display name, and global
+  // name. Whichever ones are present get scanned together. Username is
+  // intentionally NOT included — it's a handle, not an identity.
+  const nicknameParts: string[] = [];
+  if (msg.member?.nick) nicknameParts.push(msg.member.nick);
+  if (msg.author.display_name) nicknameParts.push(msg.author.display_name);
+  if (msg.author.global_name) nicknameParts.push(msg.author.global_name);
+  const posterNickname = nicknameParts.length ? nicknameParts.join(' | ') : null;
   const posterUsername = msg.author.username;
   const teamsForMessage = extractTeams({
     channelType: channel.type,
