@@ -9,6 +9,8 @@
 //   BACKFILL_STOP_DATE       ISO date floor (default 2023-01-01)
 //   BACKFILL_START_BEFORE    optional snowflake to seed channels with no
 //                            existing backfill_cursor (default: now)
+//   BACKFILL_REDO_ALL        true/1/yes = ignore stored cursors and start
+//                            from now, so old rows are rechecked/repaired.
 //   MAX_PAGES_PER_CHANNEL    cap pages per channel per run (default 1000)
 //   MAX_RUNTIME_MINUTES      bail out after this many minutes elapsed
 //                            (default 340 — leaves 20m of buffer under
@@ -27,6 +29,7 @@ const STOP_SNOWFLAKE = dateToSnowflake(STOP_DATE);
 const MAX_PAGES = Math.max(1, parseInt(process.env.MAX_PAGES_PER_CHANNEL ?? '1000', 10));
 const MAX_RUNTIME_MS = Math.max(60, parseInt(process.env.MAX_RUNTIME_MINUTES ?? '340', 10)) * 60_000;
 const START_BEFORE_OVERRIDE = process.env.BACKFILL_START_BEFORE ?? null;
+const REDO_ALL = /^(1|true|yes)$/i.test(process.env.BACKFILL_REDO_ALL ?? '');
 
 const startedAt = Date.now();
 function elapsedMs() { return Date.now() - startedAt; }
@@ -36,14 +39,16 @@ function budgetExpired() { return elapsedMs() >= MAX_RUNTIME_MS; }
 async function loadCursor(channel: ChannelConfig): Promise<string | null> {
   // 1) explicit env override
   if (START_BEFORE_OVERRIDE) return START_BEFORE_OVERRIDE;
-  // 2) prior persisted backfill cursor
+  // 2) explicit redo: ignore persisted cursor and re-walk from now.
+  if (REDO_ALL) return dateToSnowflake(new Date());
+  // 3) prior persisted backfill cursor
   const [row] = await db
     .select({ cursor: schema.scrapeState.backfillCursor })
     .from(schema.scrapeState)
     .where(eq(schema.scrapeState.channelId, channel.id))
     .limit(1);
   if (row?.cursor) return row.cursor;
-  // 3) fall back to oldest known media row for this channel — handles
+  // 4) fall back to oldest known media row for this channel — handles
   //    channels that were partially backfilled before this column existed.
   const oldest = await db
     .select({ id: schema.media.discordMessageId })
@@ -52,7 +57,7 @@ async function loadCursor(channel: ChannelConfig): Promise<string | null> {
     .orderBy(schema.media.discordMessageId)
     .limit(1);
   if (oldest[0]?.id) return oldest[0].id;
-  // 4) brand-new channel — start at "now" and walk back
+  // 5) brand-new channel — start at "now" and walk back
   return dateToSnowflake(new Date());
 }
 
@@ -73,6 +78,7 @@ async function main() {
   console.log(`[deep-backfill] floor       = ${STOP_DATE.toISOString()} (snowflake ${STOP_SNOWFLAKE})`);
   console.log(`[deep-backfill] max pages   = ${MAX_PAGES} per channel`);
   console.log(`[deep-backfill] max runtime = ${MAX_RUNTIME_MS / 60_000} min`);
+  console.log(`[deep-backfill] redo all    = ${REDO_ALL ? 'yes' : 'no'}`);
 
   const placeholders = CHANNELS.filter((c) => isPlaceholder(c.id));
   if (placeholders.length > 0) {
@@ -101,7 +107,7 @@ async function main() {
     let cursor = await loadCursor(channel);
     const startCursorDate = cursor ? snowflakeToDate(cursor) : null;
     console.log(
-      `[deep-backfill] === #${channel.name} resume cursor=${cursor} (≈${startCursorDate?.toISOString() ?? 'unknown'})`,
+      `[deep-backfill] === #${channel.name} ${REDO_ALL ? 'redo' : 'resume'} cursor=${cursor} (≈${startCursorDate?.toISOString() ?? 'unknown'})`,
     );
 
     let pages = 0;
@@ -157,15 +163,13 @@ async function main() {
 
     grandAdded += added;
     grandQueued += queued;
-    notes.push(
-      `#${channel.name}: pages=${pages} added=${added} ytq=${queued} stop=${stopReason}`,
-    );
+    notes.push(`#${channel.name}: mode=${REDO_ALL ? 'redo' : 'resume'} pages=${pages} added=${added} ytq=${queued} stop=${stopReason}`);
   }
 
   await log.finish({
     itemsAdded: grandAdded,
     errors: grandErrors,
-    notes: `floor=${STOP_DATE.toISOString()} elapsed=${elapsedMin()}m | ${notes.join(' | ')}`.slice(
+    notes: `mode=${REDO_ALL ? 'redo' : 'resume'} floor=${STOP_DATE.toISOString()} elapsed=${elapsedMin()}m | ${notes.join(' | ')}`.slice(
       0,
       1000,
     ),

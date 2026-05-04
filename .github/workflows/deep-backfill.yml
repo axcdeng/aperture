@@ -21,6 +21,11 @@ on:
         description: 'Optional: snowflake to start from (overrides per-channel resume cursor).'
         required: false
         default: ''
+      redo_all:
+        description: 'Recheck all history from now instead of resuming stored cursors.'
+        required: false
+        type: boolean
+        default: false
       human_base_ms:
         description: 'Average ms between Discord requests (jitter applied).'
         required: false
@@ -57,5 +62,6 @@ jobs:
           BACKFILL_STOP_DATE: ${{ inputs.stop_date }}
           MAX_RUNTIME_MINUTES: ${{ inputs.max_runtime_minutes }}
           BACKFILL_START_BEFORE: ${{ inputs.start_before }}
+          BACKFILL_REDO_ALL: ${{ inputs.redo_all }}
           HUMAN_BASE_MS: ${{ inputs.human_base_ms }}
         run: npm run deep-backfill

@@ -195,31 +195,63 @@ async function processMessage(
       if (team) await touchTeam(team, msg.timestamp);
 
       const id = nanoid(16);
+      const values = {
+        id,
+        teamNumber: team,
+        seasonId: seasonForDate(msg.timestamp),
+        source: 'discord',
+        sourceChannel: channel.name,
+        contentType,
+        postedAt: new Date(msg.timestamp),
+        title: msg.content?.slice(0, 240) || null,
+        description: msg.content || null,
+        authorDisplayName: posterNickname ?? posterUsername,
+        width: att.width ?? null,
+        height: att.height ?? null,
+        durationSeconds: att.duration_secs ? Math.round(att.duration_secs) : null,
+        multiTeamGroupId: groupId,
+        discordChannelId: channel.id,
+        discordMessageId: msg.id,
+        discordAttachmentId: att.id,
+        discordFilename: att.filename,
+        cdnUrl: att.url,
+        cdnThumbUrl: att.proxy_url ?? att.url,
+        cdnExpiresAt: expiresAt,
+        deletedAt: null,
+      };
+
+      await db
+        .update(schema.media)
+        .set({
+          seasonId: values.seasonId,
+          sourceChannel: values.sourceChannel,
+          contentType: values.contentType,
+          postedAt: values.postedAt,
+          title: values.title,
+          description: values.description,
+          authorDisplayName: values.authorDisplayName,
+          width: values.width,
+          height: values.height,
+          durationSeconds: values.durationSeconds,
+          multiTeamGroupId: values.multiTeamGroupId,
+          discordChannelId: values.discordChannelId,
+          discordFilename: values.discordFilename,
+          cdnUrl: values.cdnUrl,
+          cdnThumbUrl: values.cdnThumbUrl,
+          cdnExpiresAt: values.cdnExpiresAt,
+          deletedAt: null,
+        })
+        .where(
+          and(
+            eq(schema.media.discordMessageId, msg.id),
+            eq(schema.media.discordAttachmentId, att.id),
+            team === null ? isNull(schema.media.teamNumber) : eq(schema.media.teamNumber, team),
+          ),
+        );
+
       const inserted = await db
         .insert(schema.media)
-        .values({
-          id,
-          teamNumber: team,
-          seasonId: seasonForDate(msg.timestamp),
-          source: 'discord',
-          sourceChannel: channel.name,
-          contentType,
-          postedAt: new Date(msg.timestamp),
-          title: msg.content?.slice(0, 240) || null,
-          description: msg.content || null,
-          authorDisplayName: posterNickname ?? posterUsername,
-          width: att.width ?? null,
-          height: att.height ?? null,
-          durationSeconds: att.duration_secs ? Math.round(att.duration_secs) : null,
-          multiTeamGroupId: groupId,
-          discordChannelId: channel.id,
-          discordMessageId: msg.id,
-          discordAttachmentId: att.id,
-          discordFilename: att.filename,
-          cdnUrl: att.url,
-          cdnThumbUrl: att.proxy_url ?? att.url,
-          cdnExpiresAt: expiresAt,
-        })
+        .values(values)
         .onConflictDoNothing({
           target: [
             schema.media.discordMessageId,
