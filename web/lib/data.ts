@@ -55,15 +55,24 @@ function cleanTitle(raw: string | null | undefined, max = 120): string | undefin
 }
 
 function rowToMediaItem(m: DbMedia): MediaItem {
-  // Build the URL the frontend should render. For Discord, cdnUrl/cdnThumbUrl
-  // are signed CDN URLs (~24h lifetime). For YouTube, we synthesize embed URLs
-  // from the video ID — there is no Discord CDN URL.
+  // Build the URL the frontend should render.
+  //
+  // For Discord-hosted media we point at our own /api/img/<id> proxy. The
+  // proxy checks the row's cdn_expires_at on every request and re-signs via
+  // Discord's /attachments/refresh-urls endpoint if needed, so images keep
+  // working even if the cron refresher missed a row.
+  //
+  // For YouTube we synthesize the embed URL and thumbnail directly — those
+  // don't need signing.
   let fullUrl: string;
   let thumbnailUrl: string;
   if (m.source === 'youtube' && m.youtubeVideoId) {
     fullUrl = `https://www.youtube.com/embed/${m.youtubeVideoId}`;
     thumbnailUrl =
       m.cdnThumbUrl ?? `https://i.ytimg.com/vi/${m.youtubeVideoId}/hqdefault.jpg`;
+  } else if (m.source === 'discord') {
+    fullUrl = `/api/img/${m.id}?v=full`;
+    thumbnailUrl = `/api/img/${m.id}?v=thumb`;
   } else {
     fullUrl = m.cdnUrl ?? '';
     thumbnailUrl = m.cdnThumbUrl ?? m.cdnUrl ?? '';

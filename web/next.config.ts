@@ -5,6 +5,13 @@ const nextConfig: NextConfig = {
     root: __dirname,
   },
   images: {
+    // Hold optimized variants on the edge for 24h. Once a request resolves
+    // through /api/img and Vercel caches the optimized bytes, subsequent
+    // requests for the same variant skip both our proxy AND Discord.
+    minimumCacheTTL: 60 * 60 * 24,
+    // /api/img/<id>?v=thumb is our on-demand Discord proxy. Local URLs with
+    // query strings have to be explicitly allowed.
+    localPatterns: [{ pathname: '/api/img/**', search: '' }, { pathname: '/api/img/**' }],
     remotePatterns: [
       { protocol: 'https', hostname: 'picsum.photos' },
       { protocol: 'https', hostname: 'fastly.picsum.photos' },

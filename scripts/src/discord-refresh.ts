@@ -10,7 +10,7 @@
 // soft-delete on a missing-from-response, since that signal is ambiguous
 // (could be expired link, could be transient API hiccup).
 
-import { and, eq, isNull, lt } from 'drizzle-orm';
+import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import { db, schema, pool } from './lib/db';
 import { parseCdnExpiry, refreshAttachmentUrls } from './lib/discord-api';
 import { startSyncLog } from './lib/sync-log';
@@ -37,7 +37,14 @@ async function main() {
       and(
         eq(schema.media.source, 'discord'),
         isNull(schema.media.deletedAt),
-        lt(schema.media.cdnExpiresAt, horizon),
+        // Refresh anything expiring within the horizon, OR any row whose
+        // expiry was never parsed (cdn_expires_at IS NULL). Otherwise NULL
+        // rows would never get refreshed and the proxy would keep re-doing
+        // the work on every render.
+        or(
+          lt(schema.media.cdnExpiresAt, horizon),
+          isNull(schema.media.cdnExpiresAt),
+        ),
       ),
     );
 
