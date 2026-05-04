@@ -100,7 +100,7 @@ function buildItem(opts: {
   let originalUrl = 'https://discord.com/channels/000/000/' + id;
   let fullUrl = `https://picsum.photos/seed/${thumbSeed}/1600/1200`;
   if (source === 'youtube') {
-    const ytId = ('vexscout' + thumbSeed).slice(0, 11);
+    const ytId = ('aperture' + thumbSeed).slice(0, 11);
     originalUrl = `https://www.youtube.com/watch?v=${ytId}`;
     fullUrl = `https://www.youtube.com/embed/${ytId}`;
   }

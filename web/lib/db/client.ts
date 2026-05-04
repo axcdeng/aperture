@@ -5,7 +5,7 @@ import * as schema from './schema';
 declare global {
   // Reuse a single pool across hot reloads in dev.
 
-  var __vexscout_pgpool: Pool | undefined;
+  var __aperture_pgpool: Pool | undefined;
 }
 
 function getPool(): Pool {
@@ -14,13 +14,13 @@ function getPool(): Pool {
       'DATABASE_URL is not set. Either configure your Neon connection string in .env.local or set USE_SEED_DATA=true to use the local seed.',
     );
   }
-  if (!global.__vexscout_pgpool) {
-    global.__vexscout_pgpool = new Pool({
+  if (!global.__aperture_pgpool) {
+    global.__aperture_pgpool = new Pool({
       connectionString: process.env.DATABASE_URL,
       max: 5,
     });
   }
-  return global.__vexscout_pgpool;
+  return global.__aperture_pgpool;
 }
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;

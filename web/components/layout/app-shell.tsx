@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import {
   Search,
@@ -101,10 +102,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex w-full">
       {/* Sidebar — sticky so it stays put when the main column scrolls. */}
       <aside className="hidden w-64 shrink-0 border-r border-border bg-background lg:sticky lg:top-0 lg:h-screen lg:flex lg:flex-col">
-        <div className="flex h-14 items-center gap-2.5 border-b border-border px-4">
+        <Link
+          href="/"
+          className="flex h-14 items-center border-b border-border px-4 hover:opacity-80 transition-opacity"
+          aria-label="Aperture home"
+        >
           <Logo />
-          <span className="font-semibold tracking-tight">VEX Scout</span>
-        </div>
+        </Link>
         <nav className="flex-1 space-y-5 overflow-y-auto p-3">
           <NavGroup label="Scout" items={NAV_SCOUT} pathname={pathname} />
           <NavGroup label="Analytics" items={NAV_ANALYTICS} pathname={pathname} />
@@ -135,9 +139,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Mobile top bar */}
       <div className="flex flex-1 flex-col min-w-0">
-        <header className="flex h-14 items-center gap-3 border-b border-border bg-background px-4 lg:hidden">
-          <Logo />
-          <span className="font-semibold">VEX Scout</span>
+        <header className="flex h-14 items-center border-b border-border bg-background px-4 lg:hidden">
+          <Link href="/" aria-label="Aperture home" className="hover:opacity-80 transition-opacity">
+            <Logo />
+          </Link>
         </header>
         <main className="flex-1 min-w-0">{children}</main>
       </div>
@@ -146,11 +151,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 function Logo() {
+  // The asset bundles the mark + wordmark; rendered against the dark theme
+  // it appears black, so we invert it so the wordmark reads white.
   return (
-    <div className="flex h-7 w-7 items-center justify-center rounded-md border border-[#1f4c7a] bg-gradient-to-br from-[#0c2540] to-[#08121f]">
-      <svg viewBox="0 0 24 24" className="h-4 w-4 text-[#7dd3fc]" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 4l7 16 4-9 7 9" />
-      </svg>
-    </div>
+    <Image
+      src="/aperture.png"
+      alt="Aperture"
+      width={1579}
+      height={430}
+      priority
+      className="h-7 w-auto invert"
+    />
   );
 }

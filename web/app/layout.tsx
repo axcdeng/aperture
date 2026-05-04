@@ -5,7 +5,7 @@ import './globals.css';
 import { AppShell } from '@/components/layout/app-shell';
 
 export const metadata: Metadata = {
-  title: 'VEX Scout',
+  title: 'Aperture',
   description: 'Search every reveal video, robot photo, and CAD render for any VEX team.',
 };
 

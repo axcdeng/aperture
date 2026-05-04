@@ -11,7 +11,11 @@ const nextConfig: NextConfig = {
     minimumCacheTTL: 60 * 60 * 24,
     // /api/img/<id>?v=thumb is our on-demand Discord proxy. Local URLs with
     // query strings have to be explicitly allowed.
-    localPatterns: [{ pathname: '/api/img/**', search: '' }, { pathname: '/api/img/**' }],
+    localPatterns: [
+      { pathname: '/aperture.png', search: '' },
+      { pathname: '/api/img/**', search: '' },
+      { pathname: '/api/img/**' },
+    ],
     remotePatterns: [
       { protocol: 'https', hostname: 'picsum.photos' },
       { protocol: 'https', hostname: 'fastly.picsum.photos' },

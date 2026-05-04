@@ -5,11 +5,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronRight,
   ExternalLink,
-  Pencil,
   X,
-  Activity,
   Image as ImageIcon,
-  CheckCircle2,
   Copy,
 } from 'lucide-react';
 import type { MediaItem, Team } from '@/lib/types';
@@ -18,7 +15,7 @@ import { SourceBadge } from './source-badge';
 import { ContentTypeBadge } from './content-type-badge';
 import { formatRelativeTime, cn } from '@/lib/utils';
 
-const STORAGE_KEY = 'vex-scout:team-panel-width';
+const STORAGE_KEY = 'aperture:team-panel-width';
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 720;
 const DEFAULT_WIDTH = 360;
@@ -86,17 +83,23 @@ export function TeamDetailPanel({
 
   const stats = useMemo(() => {
     const lastSeen = media[0] ? formatRelativeTime(media[0].postedAt) : '—';
-    const photos = media.filter((x) => x.contentType === 'image').length;
     const total = media.length;
-    return { total, photos, lastSeen };
+    const sources = new Set(media.map((x) => x.source)).size;
+    const attachments = media.reduce((sum, x) => sum + (x.attachmentCount ?? 1), 0);
+    return { total, lastSeen, sources, attachments };
   }, [media]);
 
-  const history = media.slice(0, 3);
+  const [showAllHistory, setShowAllHistory] = useState(false);
+  const history = showAllHistory ? media : media.slice(0, 3);
+  const selectedAttachments = m?.attachments ?? (m ? [m] : []);
+  const sourceLinks = Array.from(
+    new Map(media.filter((item) => item.originalUrl).map((item) => [item.originalUrl, item])).values(),
+  ).slice(0, 4);
 
   return (
     <aside
       ref={asideRef}
-      className="relative hidden w-full shrink-0 border-l border-border bg-background xl:sticky xl:top-0 xl:h-screen xl:flex xl:flex-col"
+      className="relative hidden w-full shrink-0 border-l border-border bg-background lg:sticky lg:top-0 lg:h-screen lg:flex lg:flex-col"
       style={{ width: `${width}px` }}
     >
       <button
@@ -115,7 +118,7 @@ export function TeamDetailPanel({
         onDoubleClick={() => setWidth(DEFAULT_WIDTH)}
         onKeyDown={onHandleKey}
         className={cn(
-          'group absolute -left-1 top-0 z-20 hidden h-full w-2 cursor-col-resize xl:block',
+          'group absolute -left-1 top-0 z-20 hidden h-full w-2 cursor-col-resize lg:block',
           'before:absolute before:left-1/2 before:top-0 before:h-full before:w-px before:-translate-x-1/2 before:bg-transparent',
           dragging
             ? 'before:bg-foreground/40'
@@ -128,11 +131,11 @@ export function TeamDetailPanel({
         <div>
           <TeamNumber number={team.number} size="xl" />
           <div className="mt-1 flex items-center gap-1.5 text-xs text-muted">
-            <span>Team Alias</span>
-            <span className="text-muted-2">•</span>
-            <span>{team.region.split(',')[0]}</span>
-            <span className="text-muted-2">•</span>
-            <span>VEX VRC</span>
+            {team.organization ? <span className="truncate">{team.organization}</span> : null}
+            {team.organization && team.region ? <span className="text-muted-2">•</span> : null}
+            {team.region ? <span>{team.region}</span> : null}
+            {team.country ? <span className="text-muted-2">•</span> : null}
+            {team.country ? <span>{team.country}</span> : null}
           </div>
         </div>
         <button
@@ -147,10 +150,10 @@ export function TeamDetailPanel({
       {/* Stats row */}
       <div className="grid grid-cols-4 gap-px border-b border-border bg-border">
         {[
-          { label: 'Scoutings', value: stats.total.toString() },
+          { label: 'Messages', value: stats.total.toString() },
           { label: 'Last Seen', value: stats.lastSeen },
-          { label: 'Media', value: stats.photos.toString() },
-          { label: 'Confidence', value: '88%' },
+          { label: 'Files', value: stats.attachments.toString() },
+          { label: 'Sources', value: stats.sources.toString() },
         ].map((s) => (
           <div key={s.label} className="bg-background px-3 py-3">
             <div className="text-[10px] uppercase tracking-wider text-muted-2">{s.label}</div>
@@ -210,7 +213,9 @@ export function TeamDetailPanel({
                       <span>{formatRelativeTime(h.postedAt)}</span>
                       <SourceBadge source={h.source} size="sm" />
                     </div>
-                    <RevealStatusPill index={i} />
+                    <span className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted">
+                      {h.attachmentCount ?? 1} file{(h.attachmentCount ?? 1) === 1 ? '' : 's'}
+                    </span>
                   </div>
                   <div className="mt-1 flex items-center gap-2 font-mono text-[11px] text-muted">
                     <span>{h.seasonId === 'high-stakes' ? '24-25' : '25-26'}</span>
@@ -225,19 +230,25 @@ export function TeamDetailPanel({
               </li>
             ))}
           </ol>
-          <button className="mt-3 inline-flex items-center gap-1 text-xs text-muted hover:text-foreground">
-            View all history →
-          </button>
+          {media.length > 3 ? (
+            <button
+              type="button"
+              onClick={() => setShowAllHistory((value) => !value)}
+              className="mt-3 inline-flex items-center gap-1 text-xs text-muted hover:text-foreground"
+            >
+              {showAllHistory ? 'Show less' : `View all history (${media.length})`} →
+            </button>
+          ) : null}
         </div>
 
         {/* Source links */}
         <div className="grid grid-cols-2 gap-4 border-t border-border px-5 py-4">
           <div>
             <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-2">
-              Source Links <span className="ml-1 font-mono text-foreground">{Math.min(media.length, 4)}</span>
+              Source Links <span className="ml-1 font-mono text-foreground">{sourceLinks.length}</span>
             </div>
             <ul className="space-y-1.5">
-              {media.slice(0, 4).map((s) => (
+              {sourceLinks.map((s) => (
                 <li key={s.id}>
                   <a
                     href={s.originalUrl}
@@ -260,17 +271,15 @@ export function TeamDetailPanel({
           <div>
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[10px] uppercase tracking-wider text-muted-2">
-                Scout Notes <span className="ml-1 font-mono text-foreground">3</span>
+                Message
               </div>
-              <button className="text-muted-2 hover:text-foreground" aria-label="Edit notes">
-                <Pencil className="h-3 w-3" />
-              </button>
             </div>
             <div className="rounded-md border border-border bg-surface px-2.5 py-2 text-[11px] text-muted">
-              <p>Intake mounted higher this year.</p>
-              <p>4-bar lift. New claw geometry.</p>
-              <p>Likely running 2x Kraken.</p>
-              <p>Driver skill: <span className="text-foreground">High</span>.</p>
+              {m?.description ? (
+                <p className="line-clamp-6">{m.description}</p>
+              ) : (
+                <p>No message text.</p>
+              )}
             </div>
           </div>
         </div>
@@ -278,10 +287,10 @@ export function TeamDetailPanel({
         {/* Attachments */}
         <div className="border-t border-border px-5 py-4">
           <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-2">
-            Attachments <span className="ml-1 font-mono text-foreground">{Math.min(media.length, 17)}</span>
+            Attachments <span className="ml-1 font-mono text-foreground">{selectedAttachments.length}</span>
           </div>
           <div className="grid grid-cols-4 gap-2">
-            {media.slice(0, 3).map((a) => (
+            {selectedAttachments.slice(0, 7).map((a) => (
               <div
                 key={a.id}
                 className="relative aspect-square overflow-hidden rounded border border-border bg-surface"
@@ -295,9 +304,9 @@ export function TeamDetailPanel({
                 />
               </div>
             ))}
-            {media.length > 3 ? (
+            {selectedAttachments.length > 7 ? (
               <div className="flex aspect-square items-center justify-center rounded border border-border bg-surface text-xs text-muted">
-                +{Math.max(0, media.length - 3)}
+                +{Math.max(0, selectedAttachments.length - 7)}
                 <br />
                 more
               </div>
@@ -306,29 +315,17 @@ export function TeamDetailPanel({
         </div>
 
         <div className="px-5 pb-6 pt-2 text-[10px] text-muted-2">
-          <button className="inline-flex items-center gap-1 hover:text-foreground">
+          <button
+            type="button"
+            onClick={() => {
+              void navigator.clipboard?.writeText(`${window.location.origin}/team/${team.number}`);
+            }}
+            className="inline-flex items-center gap-1 hover:text-foreground"
+          >
             <Copy className="h-3 w-3" /> Copy team URL
           </button>
         </div>
       </div>
     </aside>
-  );
-}
-
-function RevealStatusPill({ index }: { index: number }) {
-  const map = [
-    { label: 'primary', color: '#7dd3fc', bg: 'rgba(125,211,252,0.12)' },
-    { label: 'confirmed', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
-    { label: 'duplicate', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
-  ];
-  const meta = map[index] ?? map[0];
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px]"
-      style={{ color: meta.color, backgroundColor: meta.bg }}
-    >
-      {index === 1 ? <CheckCircle2 className="h-3 w-3" /> : <Activity className="h-3 w-3" />}
-      {meta.label}
-    </span>
   );
 }

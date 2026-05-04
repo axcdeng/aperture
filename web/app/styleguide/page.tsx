@@ -10,13 +10,13 @@ import { SearchBar } from '@/components/vex/search-bar';
 import { SEED_MEDIA, SEED_TEAMS } from '@/lib/seed';
 import { Inbox, Wifi } from 'lucide-react';
 
-export const metadata = { title: 'Styleguide — VEX Scout' };
+export const metadata = { title: 'Styleguide — Aperture' };
 
 export default function StyleguidePage() {
   return (
     <div className="mx-auto w-full max-w-5xl space-y-12 px-4 py-10 sm:px-6">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">VEX Scout · Styleguide</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Aperture · Styleguide</h1>
         <p className="mt-1 text-sm text-muted">Living visual reference for every component.</p>
       </header>
 

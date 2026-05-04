@@ -107,7 +107,7 @@ function MenuItem({
   );
 }
 
-export function FeedFilters() {
+export function FeedFilters({ regions }: { regions: string[] }) {
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -115,6 +115,7 @@ export function FeedFilters() {
   const sources = (sp.get('source') ?? '').split(',').filter(Boolean) as Source[];
   const types = (sp.get('type') ?? '').split(',').filter(Boolean) as ContentType[];
   const media = sp.get('media') ?? 'all';
+  const region = sp.get('region') ?? 'all';
 
   function setParam(key: string, value: string | null) {
     const next = new URLSearchParams(sp.toString());
@@ -127,6 +128,7 @@ export function FeedFilters() {
     seasonId === 'all' ? 'All' : seasonId === 'push-back' ? '25-26' : '24-25';
   const sourceLabel = sources.length === 0 ? 'All' : sources.length === 1 ? sources[0] : `${sources.length} selected`;
   const typeLabel = types.length === 0 ? 'All' : types.length === 1 ? types[0] : `${types.length}`;
+  const regionLabel = region === 'all' ? 'All' : region;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -141,7 +143,20 @@ export function FeedFilters() {
           </MenuItem>
         ))}
       </FilterPill>
-      <FilterPill label="Region" value="Texas" />
+      <FilterPill
+        label="Region"
+        value={regionLabel}
+        onClear={region !== 'all' ? () => setParam('region', null) : undefined}
+      >
+        <MenuItem active={region === 'all'} onClick={() => setParam('region', null)}>
+          All
+        </MenuItem>
+        {regions.map((r) => (
+          <MenuItem key={r} active={region === r} onClick={() => setParam('region', r)}>
+            {r}
+          </MenuItem>
+        ))}
+      </FilterPill>
       <FilterPill
         label="Source"
         value={sourceLabel}
@@ -187,7 +202,10 @@ export function FeedFilters() {
           All
         </MenuItem>
         <MenuItem active={media === 'recent'} onClick={() => setParam('media', 'recent')}>
-          Recent
+          Last 30d
+        </MenuItem>
+        <MenuItem active={media === 'multi'} onClick={() => setParam('media', 'multi')}>
+          Multi-attachment
         </MenuItem>
       </FilterPill>
     </div>

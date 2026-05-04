@@ -1,6 +1,6 @@
-# VEX Scout — Setup Guide
+# Aperture — Setup Guide
 
-This walks you through standing up VEX Scout from scratch. Every external service signup, every key, every config step. Assume zero prior knowledge of any of these tools — just follow the steps in order.
+This walks you through standing up Aperture from scratch. Every external service signup, every key, every config step. Assume zero prior knowledge of any of these tools — just follow the steps in order.
 
 You'll set up:
 
@@ -63,13 +63,13 @@ The web build should finish with a list of routes. If it fails, stop here and fi
 
 ## 3. Set up Neon (Postgres database)
 
-**What it is:** Neon is a managed Postgres host with a generous free tier (3 GB storage, autoscale, branching). VEX Scout stores teams + media here.
+**What it is:** Neon is a managed Postgres host with a generous free tier (3 GB storage, autoscale, branching). Aperture stores teams + media here.
 
 **Steps:**
 
 1. Go to [console.neon.tech](https://console.neon.tech) and sign up (you can sign in with GitHub).
 2. Click **Create Project**.
-   - Project name: `vex-scout` (anything works).
+   - Project name: `aperture` (anything works).
    - Postgres version: leave the default.
    - Region: pick the closest to where your users are. For most users, choose the same region you'll deploy Vercel to (US East works for most of North America).
 3. After it's created, the dashboard shows a **Connection Details** card.
@@ -95,10 +95,10 @@ The web build should finish with a list of routes. If it fails, stop here and fi
 1. Go to [console.cloud.google.com](https://console.cloud.google.com).
 2. If you've never used it, accept the terms.
 3. Click the **project picker** at the top → **New Project**.
-   - Name: `vex-scout`.
+   - Name: `aperture`.
    - Leave organization blank if there's no option, or pick **No organization**.
    - Click **Create**. Wait ~10 seconds.
-4. Make sure the new project is selected (project picker should show `vex-scout`).
+4. Make sure the new project is selected (project picker should show `aperture`).
 5. Open the navigation menu → **APIs & Services** → **Library**.
 6. Search for **YouTube Data API v3**. Click it. Click **Enable**.
 7. Once enabled, go to **APIs & Services** → **Credentials**.
@@ -232,7 +232,7 @@ This step verifies the database schema works end-to-end before you push to GitHu
 ## 8. Push to GitHub
 
 1. Go to [github.com/new](https://github.com/new) and create a new repository.
-   - Name: `vex-scout` (anything is fine).
+   - Name: `aperture` (anything is fine).
    - Visibility: **Public** is recommended — public repos get **unlimited GitHub Actions minutes** for free. Private repos get 2,000 minutes/month, which is plenty for these workloads but not infinite.
    - **Don't** initialize with a README — you already have one.
 2. Push your local repo:
@@ -241,7 +241,7 @@ This step verifies the database schema works end-to-end before you push to GitHu
    cd ..   # back to /mediascout root
    git add -A
    git commit -m "Initial backend setup"
-   git remote add origin git@github.com:YOUR_USER/vex-scout.git
+   git remote add origin git@github.com:YOUR_USER/aperture.git
    git branch -M main
    git push -u origin main
    ```
@@ -339,7 +339,7 @@ The routine scrape (`*/30 * * * *`) only catches NEW messages from "now" forward
 
 1. Go to [vercel.com](https://vercel.com) and sign up (you can sign in with GitHub).
 2. **Add New** → **Project**.
-3. Pick your `vex-scout` repo.
+3. Pick your `aperture` repo.
 4. **Configure Project:**
    - **Framework preset:** Next.js (auto-detected).
    - **Root Directory:** click **Edit** → set to `web`. **This is the most important field.** If it's left at the repo root, the build will fail.

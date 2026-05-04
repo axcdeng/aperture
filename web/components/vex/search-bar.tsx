@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import type { SearchSuggestion } from '@/lib/types';
 import { TeamNumber } from './team-number';
 
-const RECENT_KEY = 'vex-scout:recent-searches';
+const RECENT_KEY = 'aperture:recent-searches';
 
 function loadRecent(): string[] {
   if (typeof window === 'undefined') return [];

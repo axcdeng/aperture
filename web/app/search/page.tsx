@@ -4,7 +4,7 @@ import { SearchBar } from '@/components/vex/search-bar';
 import { EmptyState } from '@/components/vex/empty-state';
 import { Search as SearchIcon } from 'lucide-react';
 
-export const metadata = { title: 'Search — VEX Scout' };
+export const metadata = { title: 'Search — Aperture' };
 
 export default async function SearchPage({
   searchParams,

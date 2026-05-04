@@ -2,7 +2,7 @@ import { AlertTriangle } from 'lucide-react';
 import { getUntaggedMedia } from '@/lib/data';
 import { UntaggedClient } from '@/components/vex/untagged-client';
 
-export const metadata = { title: 'Untagged — VEX Scout' };
+export const metadata = { title: 'Untagged — Aperture' };
 export const revalidate = 60;
 
 export default async function UntaggedPage() {

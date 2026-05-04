@@ -88,6 +88,7 @@ export interface DiscordAttachment {
 
 export interface DiscordMember {
   nick?: string | null;
+  user?: DiscordUser;
 }
 
 export interface DiscordUser {
@@ -207,6 +208,24 @@ export async function fetchMessage(
   const result = (await discordRequest(`/channels/${channelId}/messages/${messageId}`, {
     allow404: true,
   })) as DiscordMessage | null;
+  return result;
+}
+
+/**
+ * GET /guilds/{guild.id}/members/{user.id}
+ *
+ * Channel message history often omits `message.member` for user-token
+ * requests, even though the web client can still show server nicknames.
+ * Self-posted channels need that per-server nickname for team extraction, so
+ * the scraper falls back to this endpoint and caches the result per run.
+ */
+export async function fetchGuildMember(
+  guildId: string,
+  userId: string,
+): Promise<DiscordMember | null> {
+  const result = (await discordRequest(`/guilds/${guildId}/members/${userId}`, {
+    allow404: true,
+  })) as DiscordMember | null;
   return result;
 }
 

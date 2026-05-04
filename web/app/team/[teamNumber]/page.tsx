@@ -9,9 +9,9 @@ export async function generateMetadata({
 }) {
   const { teamNumber } = await params;
   const team = await getTeam(teamNumber);
-  if (!team) return { title: `${teamNumber} not found — VEX Scout` };
+  if (!team) return { title: `${teamNumber} not found — Aperture` };
   return {
-    title: `${team.number} · ${team.organization} — VEX Scout`,
+    title: `${team.number} · ${team.organization} — Aperture`,
     description: `Reveals, photos, and CAD for VEX team ${team.number} (${team.organization}).`,
   };
 }

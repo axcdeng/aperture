@@ -39,6 +39,10 @@ export interface MediaItem {
 
   originalUrl: string;
   authorDisplayName?: string;
+
+  attachmentCount?: number;
+  attachments?: MediaItem[];
+  teamNumbers?: string[];
 }
 
 export interface SearchSuggestion {

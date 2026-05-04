@@ -2,14 +2,16 @@
 // (forward pagination via after=cursor) and the backfill tool (backward
 // pagination via before=).
 
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, schema } from './db';
 import {
   classifyContentType,
+  fetchGuildMember,
   fetchMessages,
   parseCdnExpiry,
   type DiscordMessage,
+  type DiscordMember,
 } from './discord-api';
 import { extractTeams, extractYoutubeVideoIds } from './team-extraction';
 import { seasonForDate } from './seasons';
@@ -38,6 +40,7 @@ export interface ScrapeChannelOpts {
 
 const PAGE_SIZE = 100;
 const DEFAULT_CAP = 5000;
+const memberCache = new Map<string, Promise<DiscordMember | null>>();
 
 export async function scrapeChannel(
   channel: ChannelConfig,
@@ -162,14 +165,8 @@ async function processMessage(
     return { itemsAdded: 0, youtubeQueued: 0 };
   }
 
-  // Build a "nickname" by joining every user-presented identity field Discord
-  // returns: server nickname (member.nick), global display name, and global
-  // name. Whichever ones are present get scanned together. Username is
-  // intentionally NOT included — it's a handle, not an identity.
-  const nicknameParts: string[] = [];
-  if (msg.member?.nick) nicknameParts.push(msg.member.nick);
-  if (msg.author.display_name) nicknameParts.push(msg.author.display_name);
-  if (msg.author.global_name) nicknameParts.push(msg.author.global_name);
+  const member = await resolveGuildMember(channel, msg);
+  const nicknameParts = buildIdentityParts(msg, member);
   const posterNickname = nicknameParts.length ? nicknameParts.join(' | ') : null;
   const posterUsername = msg.author.username;
   const teamsForMessage = extractTeams({
@@ -189,6 +186,8 @@ async function processMessage(
     const expiresAt = parseCdnExpiry(att.url);
     const teams = teamsForMessage.length > 0 ? teamsForMessage : [null];
     const groupId = teamsForMessage.length > 1 ? nanoid(12) : null;
+
+    await reconcileAttachmentTags(msg, att.id, teamsForMessage);
 
     for (const team of teams) {
       // Upsert the team FIRST so the media foreign key never references a
@@ -258,6 +257,79 @@ async function processMessage(
   //    attachments loop above (teamsForMessage.length === 0 → teams = [null]).
 
   return { itemsAdded, youtubeQueued };
+}
+
+async function resolveGuildMember(
+  channel: ChannelConfig,
+  msg: DiscordMessage,
+): Promise<DiscordMember | null> {
+  if (msg.member?.nick) return msg.member;
+  if (channel.type !== 'self-posted') return msg.member ?? null;
+
+  const cacheKey = `${channel.guildId}:${msg.author.id}`;
+  let cached = memberCache.get(cacheKey);
+  if (!cached) {
+    cached = fetchGuildMember(channel.guildId, msg.author.id).catch((err) => {
+      console.warn(
+        `[scrape] member lookup failed guild=${channel.guildId} user=${msg.author.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    });
+    memberCache.set(cacheKey, cached);
+  }
+  return (await cached) ?? msg.member ?? null;
+}
+
+function buildIdentityParts(msg: DiscordMessage, member: DiscordMember | null): string[] {
+  // Prefer per-server nickname first. It is the only identity field that users
+  // commonly customize with their VEX team number in self-posted servers.
+  const parts = [
+    member?.nick,
+    msg.member?.nick,
+    member?.user?.display_name,
+    member?.user?.global_name,
+    msg.author.display_name,
+    msg.author.global_name,
+  ];
+  return Array.from(new Set(parts.filter((part): part is string => Boolean(part?.trim()))));
+}
+
+async function reconcileAttachmentTags(
+  msg: DiscordMessage,
+  attachmentId: string,
+  desiredTeams: string[],
+): Promise<void> {
+  // Re-running deep-backfill after improving nickname extraction should fix
+  // prior untagged/wrong-team rows for this exact Discord attachment. We
+  // soft-delete stale rows before inserting the desired team rows below.
+  if (desiredTeams.length === 0) {
+    await db
+      .update(schema.media)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          eq(schema.media.discordMessageId, msg.id),
+          eq(schema.media.discordAttachmentId, attachmentId),
+          isNotNull(schema.media.teamNumber),
+          isNull(schema.media.deletedAt),
+        ),
+      );
+    return;
+  }
+
+  await db
+    .update(schema.media)
+    .set({ deletedAt: new Date() })
+    .where(
+      and(
+        eq(schema.media.discordMessageId, msg.id),
+        eq(schema.media.discordAttachmentId, attachmentId),
+        isNull(schema.media.deletedAt),
+        or(isNull(schema.media.teamNumber), notInArray(schema.media.teamNumber, desiredTeams)),
+      ),
+    );
 }
 
 async function touchTeam(teamNumber: string, postedAt: string): Promise<void> {

@@ -4,7 +4,7 @@ import { MediaGridSkeleton } from '@/components/vex/media-grid';
 import { getFeed, listTeams } from '@/lib/data';
 
 export const metadata = {
-  title: 'Browse — VEX Scout',
+  title: 'Browse — Aperture',
 };
 
 export const revalidate = 60;

@@ -14,12 +14,14 @@ export function MediaCard({
   selected = false,
   href,
   onSelect,
+  onOpen,
 }: {
   item: MediaItem;
   variant?: 'grid' | 'feed';
   selected?: boolean;
   href?: string;
   onSelect?: (item: MediaItem) => void;
+  onOpen?: (item: MediaItem) => void;
 }) {
   const card = (
     <div
@@ -81,13 +83,15 @@ export function MediaCard({
           <span>{formatRelativeTime(item.postedAt)}</span>
         </div>
         <div className="mt-1 flex items-center gap-3 text-xs text-muted">
-          <span className="inline-flex items-center gap-1">
-            <MessageSquare className="h-3 w-3" />
-            {(item.id.charCodeAt(item.id.length - 1) % 5) + 1}
-          </span>
+          {item.sourceChannel ? (
+            <span className="inline-flex min-w-0 items-center gap-1">
+              <MessageSquare className="h-3 w-3 shrink-0" />
+              <span className="truncate">#{item.sourceChannel}</span>
+            </span>
+          ) : null}
           <span className="inline-flex items-center gap-1">
             <Paperclip className="h-3 w-3" />
-            {(item.id.charCodeAt(item.id.length - 1) % 3) + 1}
+            {item.attachmentCount ?? 1}
           </span>
         </div>
       </div>
@@ -98,6 +102,7 @@ export function MediaCard({
     return (
       <button
         onClick={() => onSelect(item)}
+        onDoubleClick={() => onOpen?.(item)}
         className="text-left focus:outline-none"
         aria-label={item.title ?? 'Open media'}
       >

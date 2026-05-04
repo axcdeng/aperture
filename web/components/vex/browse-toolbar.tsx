@@ -1,23 +1,27 @@
 'use client';
 
-import { History, Bookmark, SlidersHorizontal, Grid2x2, List } from 'lucide-react';
+import { Grid2x2, List, RotateCcw } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { SearchBar } from './search-bar';
 
 export function BrowseToolbar() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const hasFilters = sp.toString().length > 0;
+
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
       <div className="flex-1">
         <SearchBar />
       </div>
       <div className="flex items-center gap-1">
-        <ToolbarBtn aria-label="Recent">
-          <History className="h-4 w-4" />
-        </ToolbarBtn>
-        <ToolbarBtn aria-label="Saved">
-          <Bookmark className="h-4 w-4" />
-        </ToolbarBtn>
-        <ToolbarBtn aria-label="Sort">
-          <SlidersHorizontal className="h-4 w-4" />
+        <ToolbarBtn
+          aria-label="Clear browse filters"
+          title="Clear filters"
+          disabled={!hasFilters}
+          onClick={() => router.replace('/browse', { scroll: false })}
+        >
+          <RotateCcw className="h-4 w-4" />
         </ToolbarBtn>
       </div>
     </div>
@@ -28,7 +32,7 @@ function ToolbarBtn(props: React.ComponentProps<'button'>) {
   return (
     <button
       {...props}
-      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-muted hover:border-border-hover hover:text-foreground"
+      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-muted hover:border-border-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
     />
   );
 }
