@@ -1,8 +1,8 @@
 import {
-  DEFAULT_INTERCALL_DELAY_MS,
   GiveUpError,
   NoAccessError,
   RateLimitError,
+  humanDelay,
   sleep,
 } from './rate-limit';
 
@@ -18,6 +18,52 @@ function authHeader(): string {
   }
   // User tokens use the token directly (no "Bot " prefix).
   return token;
+}
+
+// Headers Discord's web client sends. Mimicking these makes the requests
+// look like an ordinary browser session instead of a bare scripted client.
+// Build numbers change every few weeks; if Discord stops accepting this one,
+// open https://discord.com/app, F12 → Network → any /api request → copy the
+// request's `x-super-properties` header value.
+const CHROME_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+
+const SUPER_PROPS_OBJ = {
+  os: 'Mac OS X',
+  browser: 'Chrome',
+  device: '',
+  system_locale: 'en-US',
+  browser_user_agent: CHROME_UA,
+  browser_version: '130.0.0.0',
+  os_version: '10.15.7',
+  referrer: '',
+  referring_domain: '',
+  referrer_current: '',
+  referring_domain_current: '',
+  release_channel: 'stable',
+  client_build_number: 357671,
+  client_event_source: null,
+};
+const X_SUPER_PROPERTIES = Buffer.from(JSON.stringify(SUPER_PROPS_OBJ)).toString('base64');
+
+function browserHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    Authorization: authHeader(),
+    Accept: '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'User-Agent': CHROME_UA,
+    'X-Super-Properties': X_SUPER_PROPERTIES,
+    'X-Discord-Locale': 'en-US',
+    'X-Discord-Timezone': 'America/Los_Angeles',
+    'X-Debug-Options': 'bugReporterEnabled',
+    Origin: 'https://discord.com',
+    Referer: 'https://discord.com/channels/@me',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Dest': 'empty',
+    Connection: 'keep-alive',
+    ...extra,
+  };
 }
 
 interface DiscordReqOpts {
@@ -77,11 +123,7 @@ async function discordRequest(
       const qs = params.toString();
       if (qs) url += (url.includes('?') ? '&' : '?') + qs;
     }
-    const headers: Record<string, string> = {
-      Authorization: authHeader(),
-      Accept: 'application/json',
-      'User-Agent': 'VEXScout/0.1 (+https://github.com/your-org/vex-scout)',
-    };
+    const headers = browserHeaders();
     let bodyInit: string | undefined;
     if (opts.body !== undefined) {
       headers['Content-Type'] = 'application/json';
@@ -92,7 +134,9 @@ async function discordRequest(
       headers,
       body: bodyInit,
     });
-    await sleep(DEFAULT_INTERCALL_DELAY_MS);
+    // Randomized inter-call delay with occasional longer pauses (see
+    // humanDelay() in rate-limit.ts). Replaces the previous flat 200ms.
+    await humanDelay();
 
     if (res.status === 429) {
       attempt++;

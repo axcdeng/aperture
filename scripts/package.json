@@ -11,6 +11,7 @@
     "refresh": "tsx src/discord-refresh.ts",
     "enrich": "tsx src/youtube-enrich.ts",
     "backfill": "tsx src/backfill.ts",
+    "deep-backfill": "tsx src/deep-backfill.ts",
     "retag": "tsx src/retag.ts",
     "typecheck": "tsc --noEmit"
   },
