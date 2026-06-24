@@ -99,13 +99,20 @@ export async function GET(
   const target = variant === 'full' ? cdnUrl : cdnThumbUrl;
   if (!target) return new NextResponse('No URL available', { status: 404 });
 
-  const upstream = await fetch(target, {
-    headers: {
-      Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-      'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-    },
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(target, {
+      headers: {
+        Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      },
+    });
+  } catch (err) {
+    // Network/DNS failure reaching Discord — return 502 rather than letting
+    // it surface as an unhandled 500.
+    return new NextResponse(`Upstream fetch failed: ${(err as Error).message}`, { status: 502 });
+  }
 
   if (!upstream.ok) {
     const text = await upstream.text().catch(() => '');

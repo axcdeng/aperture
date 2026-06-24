@@ -7,8 +7,11 @@ function r2RemotePatterns() {
   const patterns: { protocol: 'https'; hostname: string }[] = [
     { protocol: 'https', hostname: '*.r2.dev' },
   ];
-  const base = process.env.R2_PUBLIC_BASE_URL;
+  let base = process.env.R2_PUBLIC_BASE_URL;
   if (base) {
+    // Tolerate a scheme-less value (e.g. "media.example.com") so a valid
+    // custom domain isn't silently dropped from the allowlist.
+    if (!/^https?:\/\//.test(base)) base = `https://${base}`;
     try {
       patterns.push({ protocol: 'https', hostname: new URL(base).hostname });
     } catch {

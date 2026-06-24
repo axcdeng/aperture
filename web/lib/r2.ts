@@ -9,7 +9,12 @@
 // Must be set at build time on Vercel so next.config can allowlist the host.
 
 const RAW_BASE = process.env.R2_PUBLIC_BASE_URL ?? '';
-const BASE = RAW_BASE.replace(/\/+$/, '');
+// Normalize: prepend https:// if given without a scheme (e.g. "media.example.com")
+// and strip any trailing slash. Without a scheme, new URL()/NextResponse.redirect()
+// would throw.
+const BASE = RAW_BASE
+  ? (/^https?:\/\//.test(RAW_BASE) ? RAW_BASE : `https://${RAW_BASE}`).replace(/\/+$/, '')
+  : '';
 
 export function isR2Configured(): boolean {
   return BASE.length > 0;

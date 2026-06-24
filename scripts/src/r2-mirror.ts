@@ -108,23 +108,49 @@ async function refreshStale(rows: Row[]): Promise<void> {
 }
 
 interface RowOutcome {
-  status: 'mirrored' | 'dead' | 'error';
+  // mirrored  = uploaded to R2
+  // dead      = attachment permanently gone; soft-deleted so it's hidden + never retried
+  // transient = temporary failure (stale signature we couldn't refresh, network, 5xx); retry next run
+  // error     = unexpected failure (decode/upload); counts toward the run's exit code
+  status: 'mirrored' | 'dead' | 'transient' | 'error';
   detail?: string;
 }
 
-async function mirrorRow(row: Row): Promise<RowOutcome> {
-  if (!row.cdnUrl) return { status: 'dead', detail: 'no cdn_url' };
+async function markDeleted(id: string): Promise<void> {
+  await db.update(schema.media).set({ deletedAt: new Date() }).where(eq(schema.media.id, id));
+}
 
-  const res = await fetch(row.cdnUrl, {
-    headers: {
-      Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-      'User-Agent': CHROME_UA,
-    },
-  });
+async function mirrorRow(row: Row): Promise<RowOutcome> {
+  if (!row.cdnUrl) return { status: 'transient', detail: 'no cdn_url' };
+
+  let res: Response;
+  try {
+    res = await fetch(row.cdnUrl, {
+      headers: {
+        Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'User-Agent': CHROME_UA,
+      },
+    });
+  } catch (e) {
+    // Network/DNS blip — retry next run, don't soft-delete.
+    return { status: 'transient', detail: `fetch: ${(e as Error).message?.slice(0, 80)}` };
+  }
   if (!res.ok) {
-    // 403/404 = Discord purged or deleted the attachment — permanently dead.
-    if (res.status === 403 || res.status === 404) return { status: 'dead', detail: `http ${res.status}` };
-    return { status: 'error', detail: `http ${res.status}` };
+    // Distinguish permanent vs temporary. refreshStale() runs before this, so a
+    // row reaching here normally has a FRESH signature (cdn_expires_at in the
+    // future). A 403/404 on a fresh signature means the attachment is genuinely
+    // gone from Discord → soft-delete so it's hidden and never retried. A
+    // 403/404 on a STALE signature (refresh was rate-limited/failed) is only
+    // temporary → retry next run, never delete on an ambiguous signal.
+    const freshSig = !!row.cdnExpiresAt && row.cdnExpiresAt.getTime() > Date.now();
+    if ((res.status === 403 || res.status === 404) && freshSig) {
+      await markDeleted(row.id);
+      return { status: 'dead', detail: `http ${res.status} (fresh sig → soft-deleted)` };
+    }
+    if (res.status === 403 || res.status === 404) {
+      return { status: 'transient', detail: `http ${res.status} (stale sig, will retry)` };
+    }
+    return { status: 'transient', detail: `http ${res.status}` };
   }
 
   const input = Buffer.from(await res.arrayBuffer());
@@ -150,11 +176,22 @@ async function mirrorRow(row: Row): Promise<RowOutcome> {
 }
 
 async function main() {
+  // Fail fast on missing R2 config before touching the DB or downloading anything.
+  const missing = ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET'].filter(
+    (name) => !process.env[name],
+  );
+  if (missing.length > 0) {
+    console.error(`[r2-mirror] missing required env: ${missing.join(', ')}`);
+    await pool.end().catch(() => {});
+    process.exit(2);
+  }
+
   console.log(`[r2-mirror] max runtime = ${MAX_RUNTIME_MS / 60_000} min, batch = ${BATCH}`);
 
   const log = await startSyncLog('r2_mirror');
   let mirrored = 0;
   let dead = 0;
+  let transient = 0;
   let errors = 0;
   let stopReason = 'done';
   let cursor: Cursor = null;
@@ -167,7 +204,8 @@ async function main() {
       await refreshStale(rows);
     } catch (e) {
       // Don't abort the whole run on a refresh hiccup — rows with still-valid
-      // URLs can proceed; truly-stale ones will 403 below and count as dead.
+      // URLs proceed; rows left with a stale signature get a transient 403/404
+      // below and are retried next run (never soft-deleted on an ambiguous signal).
       if (e instanceof RateLimitError) {
         stopReason = 'rate_limited';
         console.warn('[r2-mirror] rate-limited during refresh, stopping early.');
@@ -183,6 +221,7 @@ async function main() {
         const out = await mirrorRow(row);
         if (out.status === 'mirrored') mirrored++;
         else if (out.status === 'dead') { dead++; console.warn(`[r2-mirror] dead ${row.id}: ${out.detail}`); }
+        else if (out.status === 'transient') { transient++; console.warn(`[r2-mirror] transient ${row.id}: ${out.detail}`); }
         else { errors++; console.error(`[r2-mirror] error ${row.id}: ${out.detail}`); }
       } catch (e) {
         errors++;
@@ -190,12 +229,12 @@ async function main() {
       }
     }
 
-    // Advance the keyset cursor past this page so dead/error rows never block
-    // forward progress within a run.
+    // Advance the keyset cursor past this page so dead/transient/error rows
+    // never block forward progress within a run.
     const last = rows[rows.length - 1];
     cursor = { postedAt: last.postedAt, id: last.id };
     console.log(
-      `[r2-mirror] page done mirrored=${mirrored} dead=${dead} errors=${errors} elapsed=${elapsedMin()}m`,
+      `[r2-mirror] page done mirrored=${mirrored} dead=${dead} transient=${transient} errors=${errors} elapsed=${elapsedMin()}m`,
     );
   }
   if (budgetExpired() && stopReason === 'done') stopReason = 'budget';
@@ -203,10 +242,10 @@ async function main() {
   await log.finish({
     itemsAdded: mirrored,
     errors,
-    notes: `mirrored=${mirrored} dead=${dead} errors=${errors} stop=${stopReason} elapsed=${elapsedMin()}m`.slice(0, 1000),
+    notes: `mirrored=${mirrored} dead=${dead} transient=${transient} errors=${errors} stop=${stopReason} elapsed=${elapsedMin()}m`.slice(0, 1000),
   });
   console.log(
-    `[r2-mirror] DONE mirrored=${mirrored} dead=${dead} errors=${errors} stop=${stopReason} elapsed=${elapsedMin()}m`,
+    `[r2-mirror] DONE mirrored=${mirrored} dead=${dead} transient=${transient} errors=${errors} stop=${stopReason} elapsed=${elapsedMin()}m`,
   );
   await pool.end();
   // Budget/rate-limit stops are clean partial runs, not failures.
