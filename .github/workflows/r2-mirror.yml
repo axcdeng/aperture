@@ -1,0 +1,56 @@
+name: r2-mirror
+
+# Mirrors every Discord image into Cloudflare R2 as a durable 720p WebP, so
+# the site no longer depends on Discord's expiring signed URLs. Runs on a cron
+# to pick up newly-scraped items, and can be dispatched manually with a larger
+# runtime budget to drain the initial backlog faster. The script keyset-walks
+# newest-first and checkpoints per row, so a timeout just means the next run
+# resumes from the newest still-unmirrored item.
+
+on:
+  schedule:
+    # Every 2 hours. New items from the 30-min forward scraper get mirrored
+    # within a couple hours; the backlog drains over successive runs.
+    - cron: '15 */2 * * *'
+  workflow_dispatch:
+    inputs:
+      max_runtime_minutes:
+        description: 'Soft budget. Bails out after this many minutes (≤ 350 to leave room under the 360m hard limit). Bump this for a big backlog drain.'
+        required: false
+        default: '20'
+
+concurrency:
+  group: r2-mirror
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    # Hard cap < 360. The script's MAX_RUNTIME_MINUTES bails out sooner for a
+    # graceful exit + final log line. Cron runs use the 20-min default; a
+    # manual dispatch can pass a larger budget up to ~340.
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: scripts/package-lock.json
+      - name: Install
+        working-directory: scripts
+        run: npm ci || npm install
+      - name: Mirror to R2
+        working-directory: scripts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          MAX_RUNTIME_MINUTES: ${{ inputs.max_runtime_minutes || '20' }}
+        run: npm run r2-mirror

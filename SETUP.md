@@ -270,6 +270,28 @@ GitHub Actions reads secrets from a per-repo store. The workflows reference them
 
 **Verify:** The Secrets page should now list three repository secrets.
 
+> Add four more R2 secrets (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`) here too — see step 9b — if you want durable image thumbnails.
+
+---
+
+## 9b. (Optional, recommended) Set up Cloudflare R2 for durable thumbnails
+
+Discord CDN URLs are signed and expire (~24h), and vanish entirely if a message is deleted. The `r2-mirror` workflow makes a durable 720p WebP copy of every Discord image in **Cloudflare R2** — a free object store (10 GB + zero egress) — and the site serves images straight from there. At ~30k images growing ~15k/year, this stays well inside the free tier for years.
+
+1. Sign up at [cloudflare.com](https://dash.cloudflare.com) → in the left sidebar pick **R2**. (R2 requires adding a payment method even on the free tier; you won't be charged within the free limits.)
+2. **Create bucket** → give it a name (e.g. `mediascout-thumbs`). That name is your `R2_BUCKET`.
+3. Note your **Account ID** (shown on the R2 overview page / account home). That's `R2_ACCOUNT_ID`.
+4. **Manage R2 API Tokens** → **Create API token** → permission **Object Read & Write**, scoped to the bucket. Copy the **Access Key ID** (`R2_ACCESS_KEY_ID`) and **Secret Access Key** (`R2_SECRET_ACCESS_KEY`) — the secret is shown only once.
+5. **Enable public read access** so the website can load images:
+   - **Recommended:** bucket → **Settings** → **Custom Domains** → connect a subdomain you control (e.g. `media.yourdomain.com`). It's served behind Cloudflare's CDN. That URL is your `R2_PUBLIC_BASE_URL`.
+   - **Quick start:** bucket → **Settings** → **Public Development URL** → enable. Cloudflare gives you a `https://pub-xxxx.r2.dev` URL — use that as `R2_PUBLIC_BASE_URL`.
+6. Add the four upload secrets to **GitHub Actions** (Settings → Secrets and variables → Actions): `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`.
+7. Add `R2_PUBLIC_BASE_URL` (no trailing slash) to **Vercel** env vars (step 13) so the site reads from R2. It must be present at build time.
+
+Then run the mirror: **Actions** → **r2-mirror** → **Run workflow**. For the initial 30k-image backlog, set **max_runtime_minutes** to `340` to drain as much as possible per run, and re-run until the logs report `stop=done`. After that, the every-2-hour cron keeps newly-scraped images mirrored automatically.
+
+> If you skip this step entirely, the site still works — it falls back to the on-demand `/api/img` proxy that re-signs Discord URLs live (the previous behavior).
+
 ---
 
 ## 10. Run your first Discord scrape
@@ -346,11 +368,14 @@ The routine scrape (`*/30 * * * *`) only catches NEW messages from "now" forward
    - **Build / Install / Output commands:** leave defaults.
 5. **Environment Variables** — click **Add**:
 
-   | Name           | Value                                |
-   | -------------- | ------------------------------------ |
-   | `DATABASE_URL` | The Neon connection string           |
+   | Name                  | Value                                                  |
+   | --------------------- | ------------------------------------------------------ |
+   | `DATABASE_URL`        | The Neon connection string                             |
+   | `R2_PUBLIC_BASE_URL`  | (Optional) R2 public base URL from step 9b, no trailing slash |
 
    You can add `USE_SEED_DATA=true` here if you want the deployed site to serve the seed instead of the DB. Default off.
+
+   > `R2_PUBLIC_BASE_URL` must be set **before** the build — `next.config` reads it to allowlist the image host. If you add it later, trigger a redeploy.
 
 6. Click **Deploy**.
 7. Wait ~2 minutes. Click the resulting URL.
@@ -370,6 +395,7 @@ The workflows now run on cron:
 | discord-scrape   | every 30 min              | Adds new messages to `media` and `youtube_enrichment_queue`           |
 | discord-refresh  | every 6 hours             | Re-signs Discord CDN URLs that expire in <12h                         |
 | youtube-enrich   | every 2 hours             | Fetches YouTube metadata + creates rows in `media`                    |
+| r2-mirror        | every 2 hours             | Mirrors new Discord images to R2 as durable 720p WebP (if R2 is set up, step 9b) |
 
 Wait until the next cron tick (look at the **Actions** tab — runs appear automatically). The **sync_log** table accumulates one row per run.
 
@@ -441,6 +467,12 @@ npm run enrich        # one enrich pass
 # Backfill (export first):
 export BACKFILL_BEFORE_MESSAGE_ID='<some_snowflake>'
 npm run backfill
+
+# Mirror Discord images to Cloudflare R2 as durable 720p WebP (see step 9b).
+# Needs the four R2_* vars; uses DISCORD_USER_TOKEN to re-sign stale URLs.
+export R2_ACCOUNT_ID='...' R2_ACCESS_KEY_ID='...' R2_SECRET_ACCESS_KEY='...' R2_BUCKET='...'
+export MAX_RUNTIME_MINUTES='5'   # cap the run while testing
+npm run r2-mirror
 ```
 
 `scripts/` will read `scripts/.env` if you create one (via the `dotenv` package). Don't commit it — `.env` is gitignored.
