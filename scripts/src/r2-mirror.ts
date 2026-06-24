@@ -136,20 +136,16 @@ async function mirrorRow(row: Row): Promise<RowOutcome> {
     return { status: 'transient', detail: `fetch: ${(e as Error).message?.slice(0, 80)}` };
   }
   if (!res.ok) {
-    // Distinguish permanent vs temporary. refreshStale() runs before this, so a
-    // row reaching here normally has a FRESH signature (cdn_expires_at in the
-    // future). A 403/404 on a fresh signature means the attachment is genuinely
-    // gone from Discord → soft-delete so it's hidden and never retried. A
-    // 403/404 on a STALE signature (refresh was rate-limited/failed) is only
-    // temporary → retry next run, never delete on an ambiguous signal.
-    const freshSig = !!row.cdnExpiresAt && row.cdnExpiresAt.getTime() > Date.now();
-    if ((res.status === 403 || res.status === 404) && freshSig) {
+    // A 404 means the attachment/message is gone from Discord — the path no
+    // longer exists, so re-signing can't revive it. Permanent → soft-delete the
+    // row to hide the broken image and stop retrying it forever.
+    if (res.status === 404) {
       await markDeleted(row.id);
-      return { status: 'dead', detail: `http ${res.status} (fresh sig → soft-deleted)` };
+      return { status: 'dead', detail: 'http 404 (gone upstream → soft-deleted)' };
     }
-    if (res.status === 403 || res.status === 404) {
-      return { status: 'transient', detail: `http ${res.status} (stale sig, will retry)` };
-    }
+    // A 403 means the signed URL is expired/rejected, not that the content is
+    // gone — refreshStale() re-signs it on a later run. Treat 403 (and 5xx) as
+    // transient and never soft-delete on that ambiguous signal.
     return { status: 'transient', detail: `http ${res.status}` };
   }
 
