@@ -61,6 +61,12 @@ export const media = pgTable(
     cdnThumbUrl: text('cdn_thumb_url'),
     cdnExpiresAt: timestamp('cdn_expires_at', { withTimezone: true }),
 
+    // Cloudflare R2 — durable 720p WebP mirror of the Discord image. Once
+    // r2Key is set the web app serves the R2 copy and stops depending on
+    // Discord's expiring signed URLs. null = not yet mirrored.
+    r2Key: text('r2_key'),
+    r2MirroredAt: timestamp('r2_mirrored_at', { withTimezone: true }),
+
     // YouTube-specific
     youtubeVideoId: text('youtube_video_id'),
     youtubeChannelName: text('youtube_channel_name'),
@@ -73,6 +79,8 @@ export const media = pgTable(
     index('media_season_posted_idx').on(t.seasonId, t.postedAt.desc()),
     index('media_cdn_expires_idx').on(t.cdnExpiresAt),
     index('media_youtube_video_idx').on(t.youtubeVideoId),
+    // Cheap lookup for the r2-mirror job's "needs mirroring" scan.
+    index('media_r2_pending_idx').on(t.r2Key),
     // Discord dedupe (per (channel, message, attachment) — also per team since
     // multi-team reveals share message+attachment but with different team rows).
     uniqueIndex('media_discord_dedupe_idx').on(

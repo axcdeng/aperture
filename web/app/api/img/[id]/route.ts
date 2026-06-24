@@ -7,13 +7,16 @@
 // the new one. This means images keep working even if the cron refresher
 // missed a row.
 //
-// next/image follows the redirect upstream and caches the optimized result
-// at Vercel's edge per `minimumCacheTTL` in next.config.
+// next/image fetches this route directly and caches the optimized result at
+// Vercel's edge per `minimumCacheTTL` in next.config. We return the upstream
+// bytes instead of redirecting so the optimizer never has to chase Discord's
+// expiring signed URL itself.
 
 import { and, eq, isNull } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb, schema } from '@/lib/db/client';
 import { parseCdnExpiry, refreshAttachmentUrls } from '@/lib/discord/refresh';
+import { r2PublicUrl } from '@/lib/r2';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,6 +25,7 @@ export const dynamic = 'force-dynamic';
 // before redirecting. 1 hour is comfortable headroom on Discord's ~24h
 // signed-URL lifetime.
 const REFRESH_HORIZON_MS = 60 * 60 * 1000;
+const DEVICE_CACHE_SECONDS = 60 * 60 * 24;
 
 export async function GET(
   req: NextRequest,
@@ -35,6 +39,7 @@ export async function GET(
     .select({
       id: schema.media.id,
       source: schema.media.source,
+      r2Key: schema.media.r2Key,
       cdnUrl: schema.media.cdnUrl,
       cdnThumbUrl: schema.media.cdnThumbUrl,
       cdnExpiresAt: schema.media.cdnExpiresAt,
@@ -44,6 +49,12 @@ export async function GET(
     .limit(1);
 
   if (!row) return new NextResponse('Not found', { status: 404 });
+
+  // If a durable R2 copy exists, send the client straight there (free egress,
+  // never expires). Covers any caller still hitting the proxy directly.
+  const r2 = r2PublicUrl(row.r2Key);
+  if (r2) return NextResponse.redirect(r2, 308);
+
   if (row.source !== 'discord' || !row.cdnUrl) {
     return new NextResponse('Not a Discord-hosted asset', { status: 400 });
   }
@@ -88,8 +99,38 @@ export async function GET(
   const target = variant === 'full' ? cdnUrl : cdnThumbUrl;
   if (!target) return new NextResponse('No URL available', { status: 404 });
 
-  // Short browser cache; the upstream Discord URL has its own ~24h expiry.
-  // Vercel's image optimizer uses minimumCacheTTL (set in next.config) for
-  // its own cache layer, which is the one that actually matters for cost.
-  return NextResponse.redirect(target, { status: 302, headers: { 'Cache-Control': 'public, max-age=300' } });
+  let upstream: Response;
+  try {
+    upstream = await fetch(target, {
+      headers: {
+        Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      },
+    });
+  } catch (err) {
+    // Network/DNS failure reaching Discord — return 502 rather than letting
+    // it surface as an unhandled 500.
+    return new NextResponse(`Upstream fetch failed: ${(err as Error).message}`, { status: 502 });
+  }
+
+  if (!upstream.ok) {
+    const text = await upstream.text().catch(() => '');
+    return new NextResponse(`Discord asset fetch failed (${upstream.status}) ${text.slice(0, 120)}`, {
+      status: upstream.status === 404 ? 404 : 502,
+    });
+  }
+
+  const contentType = upstream.headers.get('content-type') ?? 'application/octet-stream';
+  if (!contentType.startsWith('image/') && !contentType.startsWith('video/')) {
+    return new NextResponse(`Unexpected Discord asset type: ${contentType}`, { status: 502 });
+  }
+
+  return new NextResponse(upstream.body, {
+    status: 200,
+    headers: {
+      'Content-Type': contentType,
+      'Cache-Control': `public, max-age=${DEVICE_CACHE_SECONDS}`,
+    },
+  });
 }

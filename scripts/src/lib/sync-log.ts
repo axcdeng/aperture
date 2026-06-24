@@ -1,7 +1,12 @@
 import { db, schema } from './db';
 import { eq } from 'drizzle-orm';
 
-export type JobType = 'discord_scrape' | 'discord_refresh' | 'youtube_enrich' | 'backfill';
+export type JobType =
+  | 'discord_scrape'
+  | 'discord_refresh'
+  | 'youtube_enrich'
+  | 'backfill'
+  | 'r2_mirror';
 
 export interface SyncLogger {
   finish(opts: { itemsAdded?: number; itemsRefreshed?: number; errors?: number; notes?: string }): Promise<void>;

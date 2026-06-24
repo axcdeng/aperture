@@ -24,6 +24,7 @@ import type {
 import { SEED_LAST_SYNC, SEED_MEDIA, SEED_TEAMS } from './seed';
 import { getDb, schema } from './db/client';
 import type { Media as DbMedia, Team as DbTeam } from './db/schema';
+import { r2PublicUrl } from './r2';
 
 // ---------------------------------------------------------------------------
 // Toggle: when USE_SEED_DATA=true (or DATABASE_URL is missing), all functions
@@ -64,12 +65,21 @@ function rowToMediaItem(m: DbMedia): MediaItem {
   //
   // For YouTube we synthesize the embed URL and thumbnail directly — those
   // don't need signing.
+  //
+  // Once a Discord image has been mirrored to R2 (r2_key set), we serve the
+  // durable 720p WebP straight from R2's public origin for BOTH the grid and
+  // the lightbox — nothing breaks when the Discord URL expires. Un-mirrored
+  // rows fall back to the on-demand /api/img proxy.
   let fullUrl: string;
   let thumbnailUrl: string;
+  const r2Url = m.source === 'discord' ? r2PublicUrl(m.r2Key) : null;
   if (m.source === 'youtube' && m.youtubeVideoId) {
     fullUrl = `https://www.youtube.com/embed/${m.youtubeVideoId}`;
     thumbnailUrl =
       m.cdnThumbUrl ?? `https://i.ytimg.com/vi/${m.youtubeVideoId}/hqdefault.jpg`;
+  } else if (m.source === 'discord' && r2Url && m.contentType === 'image') {
+    fullUrl = r2Url;
+    thumbnailUrl = r2Url;
   } else if (m.source === 'discord') {
     fullUrl = `/api/img/${m.id}?v=full`;
     thumbnailUrl = `/api/img/${m.id}?v=thumb`;
