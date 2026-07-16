@@ -16,6 +16,7 @@ import {
   Check,
   Images,
   Plus,
+  Minus,
   Tag as TagIcon,
   Users,
   ArrowUpRight,
@@ -54,6 +55,13 @@ import {
 
 const DND = 'application/x-aperture-item';
 type DragPayload = { kind: 'photos'; keys: string[] } | { kind: 'folder'; id: string };
+type PhotoGroup = {
+  key: string;
+  label: string;
+  kind: 'team' | 'tag' | 'plain';
+  tag?: Tag;
+  photos: MediaItem[];
+};
 
 export function AlbumDetailClient({
   album,
@@ -73,6 +81,9 @@ export function AlbumDetailClient({
   const [teamsExpanded, setTeamsExpanded] = useState(false);
   const [teamsOverflow, setTeamsOverflow] = useState(false);
   const teamsRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<'default' | 'team' | 'tag'>('default');
+  const [cols, setCols] = useState(3); // photos per row in Default view
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set()); // expanded groups in Team/Tag views
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null); // folderId | 'crumb:<id|root>'
@@ -90,12 +101,47 @@ export function AlbumDetailClient({
     setCfg(loadOrganize());
     try {
       if (localStorage.getItem('aperture:albums:teamsExpanded') === '1') setTeamsExpanded(true);
+      const v = localStorage.getItem('aperture:albums:view');
+      if (v === 'team' || v === 'tag' || v === 'default') setView(v);
+      const c = parseInt(localStorage.getItem('aperture:albums:cols') ?? '', 10);
+      if (c >= 2 && c <= 8) setCols(c);
     } catch {
       /* ignore */
     }
     setReady(true);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
+
+  function changeView(v: 'default' | 'team' | 'tag') {
+    setView(v);
+    setOpenGroups(new Set());
+    try {
+      localStorage.setItem('aperture:albums:view', v);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function changeCols(delta: number) {
+    setCols((c) => {
+      const next = Math.min(8, Math.max(2, c + delta));
+      try {
+        localStorage.setItem('aperture:albums:cols', String(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
+
+  function toggleGroup(key: string) {
+    setOpenGroups((prev) => {
+      const n = new Set(prev);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
+  }
 
   function toggleTeams() {
     setTeamsExpanded((v) => {
@@ -204,7 +250,64 @@ export function AlbumDetailClient({
     return list;
   }, [cfg, folderId, query, activeTag, activeTeam, photos, byKey]);
 
+  // Base set for the grouped (By Team / By Tag) views: search + facet filters,
+  // but NOT folder scope (grouping replaces folders).
+  const groupBase = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let list = photos;
+    if (activeTeam) list = list.filter((p) => (p.teamNumbers ?? []).includes(activeTeam));
+    if (activeTag) list = list.filter((p) => (cfg.photoTags[keyOf(p)] ?? []).includes(activeTag));
+    if (q)
+      list = list.filter(
+        (p) =>
+          (p.originalFilename ?? '').toLowerCase().includes(q) ||
+          (p.teamNumbers ?? []).some((t) => t.toLowerCase().includes(q)) ||
+          tagsForPhoto(cfg, keyOf(p)).some((t) => t.name.toLowerCase().includes(q)),
+      );
+    return list;
+  }, [photos, activeTeam, activeTag, query, cfg]);
+
+  const groups = useMemo<PhotoGroup[]>(() => {
+    if (view === 'team') {
+      const by = new Map<string, MediaItem[]>();
+      for (const p of groupBase)
+        for (const t of p.teamNumbers ?? []) {
+          const a = by.get(t);
+          if (a) a.push(p);
+          else by.set(t, [p]);
+        }
+      const res: PhotoGroup[] = allTeams
+        .filter((t) => by.has(t))
+        .map((t) => ({ key: t, label: t, kind: 'team', photos: by.get(t)! }));
+      const none = groupBase.filter((p) => !(p.teamNumbers ?? []).length);
+      if (none.length) res.push({ key: '__none', label: 'No team', kind: 'plain', photos: none });
+      return res;
+    }
+    if (view === 'tag') {
+      const by = new Map<string, MediaItem[]>();
+      for (const p of groupBase)
+        for (const id of cfg.photoTags[keyOf(p)] ?? []) {
+          const a = by.get(id);
+          if (a) a.push(p);
+          else by.set(id, [p]);
+        }
+      const res: PhotoGroup[] = cfg.tags
+        .filter((t) => by.has(t.id))
+        .map((t) => ({ key: t.id, label: t.name, kind: 'tag', tag: t, photos: by.get(t.id)! }));
+      const none = groupBase.filter((p) => !(cfg.photoTags[keyOf(p)] ?? []).length);
+      if (none.length) res.push({ key: '__none', label: 'Untagged', kind: 'plain', photos: none });
+      return res;
+    }
+    return [];
+  }, [view, groupBase, allTeams, cfg]);
+
   const selKeys = Array.from(selected);
+
+  const [lightboxItems, setLightboxItems] = useState<MediaItem[]>([]);
+  function openLightbox(items: MediaItem[], id: string) {
+    setLightboxItems(items);
+    setActiveId(id);
+  }
 
   function toggleSelect(key: string) {
     setSelected((prev) => {
@@ -430,6 +533,24 @@ export function AlbumDetailClient({
         ) : null}
       </div>
 
+      {/* ---- View switcher ---- */}
+      <div className="mb-3 inline-flex items-center gap-0.5 rounded-md border border-border bg-surface p-0.5 text-xs">
+        {(['default', 'team', 'tag'] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => changeView(v)}
+            className={cn(
+              'rounded px-2.5 py-1 transition-colors',
+              view === v ? 'bg-foreground font-medium text-accent-fg' : 'text-muted hover:text-foreground',
+            )}
+          >
+            {v === 'default' ? 'Default' : v === 'team' ? 'By Team' : 'By Tag'}
+          </button>
+        ))}
+      </div>
+
+      {view === 'default' ? (
+        <>
       {/* ---- Breadcrumb + toolbar ---- */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1 text-xs">
@@ -583,7 +704,7 @@ export function AlbumDetailClient({
       {subfolders.length > 0 ? (
         <>
           <SectionLabel>Folders</SectionLabel>
-          <div className="mb-1 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          <div className="mb-1 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
             {subfolders.map((f) => (
               <FolderCard
                 key={f.id}
@@ -608,7 +729,27 @@ export function AlbumDetailClient({
       ) : null}
 
       {/* ---- Photos section ---- */}
-      <SectionLabel>{folderId === null ? 'Photos' : 'In this folder'}</SectionLabel>
+      <div className="mb-2 flex items-center justify-between">
+        <SectionLabel>{folderId === null ? 'Photos' : 'In this folder'}</SectionLabel>
+        <div className="flex items-center gap-0.5 text-muted-2">
+          <button
+            onClick={() => changeCols(-1)}
+            disabled={cols <= 2}
+            aria-label="Fewer per row (larger)"
+            className="rounded p-1 hover:text-foreground disabled:opacity-30"
+          >
+            <Minus className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => changeCols(1)}
+            disabled={cols >= 8}
+            aria-label="More per row (smaller)"
+            className="rounded p-1 hover:text-foreground disabled:opacity-30"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
       {visiblePhotos.length === 0 ? (
         <EmptyState
           icon={Images}
@@ -622,7 +763,10 @@ export function AlbumDetailClient({
           }
         />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+          className="grid gap-3"
+          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+        >
           {visiblePhotos.map((p) => (
             <PhotoCard
               key={p.id}
@@ -631,15 +775,24 @@ export function AlbumDetailClient({
               tags={tagsForPhoto(cfg, keyOf(p))}
               selected={selected.has(keyOf(p))}
               onToggleSelect={() => toggleSelect(keyOf(p))}
-              onOpen={() => setActiveId(p.id)}
+              onOpen={() => openLightbox(visiblePhotos, p.id)}
               onDragStart={(e) => startPhotoDrag(e, keyOf(p))}
             />
           ))}
         </div>
       )}
+        </>
+      ) : (
+        <GroupedView
+          groups={groups}
+          openGroups={openGroups}
+          onToggleGroup={toggleGroup}
+          onOpenPhoto={openLightbox}
+        />
+      )}
 
       <Lightbox
-        items={visiblePhotos}
+        items={lightboxItems}
         activeId={activeId}
         onClose={() => setActiveId(null)}
         onChange={(id) => setActiveId(id)}
@@ -921,31 +1074,131 @@ function FolderCard({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onClick={onOpen}
+      title={name}
       className={cn(
-        'group relative flex aspect-[4/3] cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border bg-surface transition-all',
+        'group flex h-10 cursor-pointer items-center gap-2 rounded-md border bg-surface px-2.5 transition-all',
         over ? 'border-foreground/50 ring-2 ring-foreground/40' : 'border-border hover:border-border-hover',
       )}
-      onClick={onOpen}
     >
-      <FolderIcon className="h-10 w-10 text-muted-2 transition-colors group-hover:text-muted" />
-      <div className="max-w-[85%] truncate px-2 text-sm font-medium text-foreground" title={name}>
-        {name}
-      </div>
-      <div className="font-mono text-[10px] text-muted-2">
-        {count} {count === 1 ? 'photo' : 'photos'}
-        {subCount ? ` · ${subCount} folders` : ''}
-      </div>
+      <FolderIcon className="h-4 w-4 shrink-0 text-muted-2 transition-colors group-hover:text-muted" />
+      <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{name}</span>
+      <span className="shrink-0 font-mono text-[10px] text-muted-2">
+        {count}
+        {subCount ? `·${subCount}f` : ''}
+      </span>
       <button
         onClick={(e) => {
           e.stopPropagation();
           onDelete();
         }}
         aria-label={`Delete folder ${name}`}
-        className="absolute right-2 top-2 rounded p-0.5 text-muted-2 opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+        className="shrink-0 rounded p-0.5 text-muted-2 opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
       >
         <X className="h-3.5 w-3.5" />
       </button>
     </div>
+  );
+}
+
+// Finder-style grouped view (By Team / By Tag): each group is a header with a
+// "Show all (N)" toggle and a single clipped row of thumbnails that expands to
+// a full wrapping grid.
+function GroupedView({
+  groups,
+  openGroups,
+  onToggleGroup,
+  onOpenPhoto,
+}: {
+  groups: PhotoGroup[];
+  openGroups: Set<string>;
+  onToggleGroup: (key: string) => void;
+  onOpenPhoto: (items: MediaItem[], id: string) => void;
+}) {
+  if (groups.length === 0) {
+    return (
+      <EmptyState icon={Images} title="Nothing to show" description="No photos match the current filter." />
+    );
+  }
+  return (
+    <div className="space-y-6">
+      {groups.map((g) => {
+        const expanded = openGroups.has(g.key);
+        return (
+          <div key={g.key}>
+            <div className="mb-2 flex items-center justify-between border-b border-border pb-1.5">
+              <div className="flex items-center gap-2">
+                {g.kind === 'team' ? (
+                  <TeamNumber number={g.label} size="md" />
+                ) : g.kind === 'tag' && g.tag ? (
+                  <span
+                    className="inline-flex items-center gap-1.5 text-sm font-medium"
+                    style={{ color: g.tag.color }}
+                  >
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: g.tag.color }} />
+                    {g.tag.name}
+                  </span>
+                ) : (
+                  <span className="text-sm font-medium text-muted">{g.label}</span>
+                )}
+                <span className="font-mono text-[10px] text-muted-2">{g.photos.length}</span>
+              </div>
+              <button
+                onClick={() => onToggleGroup(g.key)}
+                className="text-xs text-muted transition-colors hover:text-foreground"
+              >
+                {expanded ? 'Show less' : `Show all (${g.photos.length})`}
+              </button>
+            </div>
+            {expanded ? (
+              <div
+                className="grid gap-3"
+                style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}
+              >
+                {g.photos.map((p) => (
+                  <RowThumb key={p.id} photo={p} onOpen={() => onOpenPhoto(g.photos, p.id)} />
+                ))}
+              </div>
+            ) : (
+              <div className="flex gap-3 overflow-hidden">
+                {g.photos.map((p) => (
+                  <div key={p.id} className="w-40 shrink-0">
+                    <RowThumb photo={p} onOpen={() => onOpenPhoto(g.photos, p.id)} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RowThumb({ photo, onOpen }: { photo: MediaItem; onOpen: () => void }) {
+  return (
+    <button onClick={onOpen} className="group block w-full text-left">
+      <div className="relative aspect-[4/3] overflow-hidden rounded-md border border-border bg-[#0d0d0d] transition-colors group-hover:border-border-hover">
+        {photo.thumbnailUrl ? (
+          <Image
+            src={photo.thumbnailUrl}
+            alt={photo.originalFilename ?? 'photo'}
+            fill
+            sizes="160px"
+            className="object-cover"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-muted-2">
+            <Images className="h-5 w-5" />
+          </div>
+        )}
+      </div>
+      {photo.originalFilename ? (
+        <div className="mt-1 truncate font-mono text-[10px] text-muted-2" title={photo.originalFilename}>
+          {photo.originalFilename}
+        </div>
+      ) : null}
+    </button>
   );
 }
 
