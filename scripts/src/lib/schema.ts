@@ -12,6 +12,7 @@ import {
   serial,
   index,
   uniqueIndex,
+  unique,
 } from 'drizzle-orm/pg-core';
 
 // ---------------------------------------------------------------------------
@@ -26,6 +27,30 @@ export const teams = pgTable('teams', {
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
   mediaCount: integer('media_count').default(0).notNull(),
 });
+
+// ---------------------------------------------------------------------------
+// events — a competition photo album. Album photos are `media` rows with
+// source='album' and event_id set. Distinct from `season_id` (which is a
+// broad game-year bucket); one season spans many events.
+// ---------------------------------------------------------------------------
+export const events = pgTable(
+  'events',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    // Event date (used as the fallback photo timestamp when a photo has no
+    // EXIF capture time). Nullable — some albums have no known date.
+    date: timestamp('date', { withTimezone: true }),
+    location: text('location'),
+    // Cover is stored by filename (event-scoped), not a media-row FK: album
+    // rows are soft-deletable/replaceable on re-import, so a row FK would
+    // dangle. Resolved to whichever live row exists at query time.
+    coverOriginalFilename: text('cover_original_filename'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('events_slug_idx').on(t.slug)],
+);
 
 // ---------------------------------------------------------------------------
 // media
@@ -67,6 +92,14 @@ export const media = pgTable(
     r2Key: text('r2_key'),
     r2MirroredAt: timestamp('r2_mirrored_at', { withTimezone: true }),
 
+    // Album-specific (source='album'). Photos imported from a local album
+    // folder. r2Key holds the ~480px thumb (same as Discord); r2FullKey holds
+    // the ~1080px display image. originalFilename lets the 4K original be
+    // found later by name. See scripts/src/import-album.ts.
+    eventId: text('event_id').references(() => events.id, { onDelete: 'set null' }),
+    originalFilename: text('original_filename'),
+    r2FullKey: text('r2_full_key'),
+
     // YouTube-specific
     youtubeVideoId: text('youtube_video_id'),
     youtubeChannelName: text('youtube_channel_name'),
@@ -90,6 +123,17 @@ export const media = pgTable(
     ),
     // YouTube dedupe per team
     uniqueIndex('media_youtube_dedupe_idx').on(t.youtubeVideoId, t.teamNumber),
+    // Album lookups: collapse a photo's per-team rows by (event, filename).
+    index('media_event_file_idx').on(t.eventId, t.originalFilename),
+    // Album dedupe per (event, filename, team). A UNIQUE CONSTRAINT (not a
+    // unique index) because only the constraint builder exposes
+    // .nullsNotDistinct() in drizzle 0.45.2 — needed so untagged rows
+    // (team_number = NULL) also dedupe; otherwise a re-import would insert a
+    // fresh untagged row every time. Defensive guard: the importer also does
+    // an explicit SELECT-diff-write and never relies on onConflict.
+    unique('media_album_dedupe_idx')
+      .on(t.eventId, t.originalFilename, t.teamNumber)
+      .nullsNotDistinct(),
   ],
 );
 
@@ -148,6 +192,8 @@ export const syncLog = pgTable('sync_log', {
 // ---------------------------------------------------------------------------
 export type Team = typeof teams.$inferSelect;
 export type NewTeam = typeof teams.$inferInsert;
+export type Event = typeof events.$inferSelect;
+export type NewEvent = typeof events.$inferInsert;
 export type Media = typeof media.$inferSelect;
 export type NewMedia = typeof media.$inferInsert;
 export type ScrapeState = typeof scrapeState.$inferSelect;

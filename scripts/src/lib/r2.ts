@@ -10,7 +10,7 @@
 // The bucket's public base URL (custom domain or r2.dev) is only needed by the
 // web app for reads, so it lives there — not here.
 
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 
 let cached: S3Client | null = null;
 
@@ -66,4 +66,40 @@ export async function uploadObject(
 /** Object key for a media item's 720p thumbnail. */
 export function thumbKey(mediaId: string): string {
   return `thumbs/${mediaId}.webp`;
+}
+
+/**
+ * Object key for an album photo's ~1080px display image. Keys are content-
+ * stable (the slug carries a content hash), so re-imports overwrite the same
+ * object rather than orphaning old ones.
+ */
+export function albumFullKey(eventId: string, slug: string): string {
+  return `albums/${eventId}/${slug}.full.webp`;
+}
+
+/** Object key for an album photo's ~480px thumbnail. */
+export function albumThumbKey(eventId: string, slug: string): string {
+  return `albums/${eventId}/${slug}.thumb.webp`;
+}
+
+/**
+ * Return true if an object already exists in the bucket. Used by the album
+ * importer to skip re-encoding+re-uploading a derivative that's already there
+ * (keys are content-hashed, so an existing key means identical bytes).
+ * Any non-404 error propagates — we don't want to silently re-upload on an
+ * auth/network failure and mask a real problem.
+ */
+export async function objectExists(key: string): Promise<boolean> {
+  try {
+    await client().send(
+      new HeadObjectCommand({ Bucket: r2Bucket(), Key: key }),
+    );
+    return true;
+  } catch (e) {
+    const err = e as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+      return false;
+    }
+    throw e;
+  }
 }

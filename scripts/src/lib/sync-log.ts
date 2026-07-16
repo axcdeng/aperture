@@ -6,7 +6,8 @@ export type JobType =
   | 'discord_refresh'
   | 'youtube_enrich'
   | 'backfill'
-  | 'r2_mirror';
+  | 'r2_mirror'
+  | 'album_import';
 
 export interface SyncLogger {
   finish(opts: { itemsAdded?: number; itemsRefreshed?: number; errors?: number; notes?: string }): Promise<void>;

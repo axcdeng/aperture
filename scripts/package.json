@@ -14,6 +14,7 @@
     "deep-backfill": "tsx src/deep-backfill.ts",
     "r2-mirror": "tsx src/r2-mirror.ts",
     "retag": "tsx src/retag.ts",
+    "import-album": "tsx src/import-album.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

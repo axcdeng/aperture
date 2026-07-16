@@ -7,3 +7,6 @@ node_modules/
 .DS_Store
 .vercel
 /web/lib/db/migrations/meta/
+
+# Local competition photo albums (raw 4K originals + sorted aliases live here, never committed)
+/Albums/
