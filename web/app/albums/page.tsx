@@ -3,6 +3,7 @@ import Image from 'next/image';
 import { Images } from 'lucide-react';
 import { listAlbums } from '@/lib/data';
 import { EmptyState } from '@/components/vex/empty-state';
+import { NewAlbumButton } from '@/components/vex/new-album-button';
 import { formatDate } from '@/lib/utils';
 
 export const metadata = { title: 'Albums — Aperture' };
@@ -13,16 +14,21 @@ export default async function AlbumsPage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-      <h1 className="text-xl font-semibold tracking-tight">Albums</h1>
-      <p className="mb-6 mt-1 text-xs text-muted">
-        Competition photo albums, tagged by team license plate.
-      </p>
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Albums</h1>
+          <p className="mt-1 text-xs text-muted">
+            Competition photo albums, tagged by team license plate.
+          </p>
+        </div>
+        <NewAlbumButton />
+      </div>
 
       {albums.length === 0 ? (
         <EmptyState
           icon={Images}
           title="No albums yet"
-          description="Import a competition album locally with `npm run import-album`."
+          description="Create an empty album, then open it and click Import to upload photos and tags."
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

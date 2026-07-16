@@ -19,6 +19,38 @@ several teams. Many photos are crowds/venue shots with no robot → no teams.
 
 Small album (≤ ~40 photos)? Skip the machinery — just do "Read a plate" (below) inline.
 
+## 0. Before you start — resume check (multi-day events)
+
+Someone (you on an earlier day, or another person) may have already sorted part of this
+event. **Never re-tag photos that are already done.** Build a skip-set from two sources,
+then process only the *remaining* raw files.
+
+**a) Local manifest.** If `Sorted/tags.json` already exists in this event folder, load it —
+its keys are already-sorted filenames. You will merge new results into it (don't overwrite).
+
+**b) The site (other people / other machines).** The Aperture site exposes a read-only,
+unauthenticated API of what's already uploaded/tagged for an album. Use it so parallel
+sorters don't collide.
+
+First find the album's `slug`. You need the site base URL (call it `$APERTURE`); if you
+don't know it, **ask the user for the site URL**. Then:
+```bash
+# List albums to find the one you're working on:
+curl -s "$APERTURE/api/public/albums" | jq .
+# If exactly one album name matches this event folder, use its slug. If several
+# match or none do, STOP and ask the user which album this is.
+
+# Already-present photos for that album (filenames only; [] = uploaded, untagged):
+curl -s "$APERTURE/api/public/albums/<slug>/sorted" | jq '.photos | keys'
+```
+
+**Skip-set = keys of local `tags.json` ∪ keys from the `/sorted` response.** Exclude those
+filenames from triage and from the to-read list entirely. Only brand-new raw files get
+processed. If the skip-set already covers every raw file, there's nothing to do — report that.
+
+> The `/sorted` and `/albums` endpoints are rate-limited (~30 req/min). One call each is
+> plenty — don't poll.
+
 ## Layout
 
 ```
@@ -47,10 +79,17 @@ re-view that one photo at higher res (`sips -Z 2000 …`) or leave it out.
 ## Workflow
 
 ### 0. Make 720p working copies (keep JPEG; HEIC → JPEG)
+Only make copies for files **not in the skip-set** from the resume check — already-sorted
+photos are never re-processed.
 ```bash
 mkdir -p .work Sorted
 for f in "[Raw]"/*; do
-  sips -s format jpeg -Z 1280 "$f" --out ".work/$(basename "${f%.*}").jpg" >/dev/null
+  base="$(basename "$f")"
+  # Skip if this filename is already in Sorted/tags.json (or the site's /sorted set).
+  if [ -f Sorted/tags.json ] && jq -e --arg k "$base" '.photos | has($k)' Sorted/tags.json >/dev/null; then
+    continue
+  fi
+  sips -s format jpeg -Z 1280 "$f" --out ".work/${base%.*}.jpg" >/dev/null
 done
 ```
 
@@ -81,7 +120,9 @@ Split the to-read filenames into 5–8 roughly equal chunks and spawn one subage
 
 ### 3. Merge, alias, verify (main agent only)
 Merge every subagent's JSON with the `non-robot HIGH` `[]` entries into `Sorted/tags.json`
-(keys are the original `[Raw]/` filenames). Then build the aliases — symlinks, never copies:
+(keys are the original `[Raw]/` filenames). **Preserve any pre-existing entries** from a
+prior day/person — union the new results on top; never drop keys you didn't process this run.
+Then build the aliases — symlinks, never copies:
 ```bash
 # per "file → [teams]", for each team:
 mkdir -p "Sorted/<TEAM>"
@@ -113,6 +154,13 @@ jq -r '.photos[][]' Sorted/tags.json | grep -vE '^[0-9]{1,5}[A-Z]?$'
 # 4. Summary to report:
 jq -r '"photos: \(.photos|length)  tagged: \([.photos[]|select(length>0)]|length)  teams: \([.photos[][]]|unique|length)"' Sorted/tags.json
 ```
+
+## Handing off to the site
+The operator publishes by opening the album's **Import** page on the Aperture site and
+dropping (1) every `[Raw]/` photo into the photos box and (2) `Sorted/tags.json` into the
+tags box. Photos are downscaled in the browser before upload; tagging matches on filename,
+so re-uploading photos already present just updates them. You only produce `Sorted/tags.json`
+— you don't upload.
 
 ## Common mistakes
 | Mistake | Fix |

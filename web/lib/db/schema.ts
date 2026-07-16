@@ -42,6 +42,8 @@ export const events = pgTable(
     // EXIF capture time). Nullable — some albums have no known date.
     date: timestamp('date', { withTimezone: true }),
     location: text('location'),
+    // Free-form operator note shown on the album (e.g. "Day 1 of 3").
+    note: text('note'),
     // Cover is stored by filename (event-scoped), not a media-row FK: album
     // rows are soft-deletable/replaceable on re-import, so a row FK would
     // dangle. Resolved to whichever live row exists at query time.

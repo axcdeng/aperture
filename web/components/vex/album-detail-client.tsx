@@ -427,9 +427,19 @@ export function AlbumDetailClient({
               .filter(Boolean)
               .join(' · ') || '—'}
           </p>
+          {album.note ? <p className="mt-1 text-xs text-muted-2">{album.note}</p> : null}
         </div>
-        <div className="font-mono text-[11px] text-muted-2">
-          {album.photoCount} photos · {album.teamCount} teams
+        <div className="flex items-center gap-3">
+          <div className="font-mono text-[11px] text-muted-2">
+            {album.photoCount} photos · {album.teamCount} teams
+          </div>
+          <Link
+            href={`/albums/${album.slug}/import`}
+            target="_blank"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs text-foreground transition-colors hover:border-border-hover"
+          >
+            <Upload className="h-3.5 w-3.5" /> Import
+          </Link>
         </div>
       </div>
 

@@ -62,6 +62,7 @@ export interface AlbumSummary {
   slug: string;
   date?: string;
   location?: string;
+  note?: string;
   coverUrl?: string;
   photoCount: number;
   teamCount: number;
