@@ -75,9 +75,9 @@ export function AlbumDetailClient({
   const [dragOver, setDragOver] = useState<string | null>(null); // folderId | 'crumb:<id|root>'
   const [newFolder, setNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
-  const [newTag, setNewTag] = useState(false);
-  const [newTagName, setNewTagName] = useState('');
-  const [swatchFor, setSwatchFor] = useState<string | null>(null);
+  const [tagMenu, setTagMenu] = useState<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(
+    null,
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -95,9 +95,57 @@ export function AlbumDetailClient({
     return Array.from(s).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }, [photos]);
 
+  // team -> photo keys, for the tag menu's "add teams' photos" option.
+  const teamToKeys = useMemo(() => {
+    const m = new Map<string, string[]>();
+    photos.forEach((p) => {
+      const k = photoKey(p.eventId, p.originalFilename);
+      (p.teamNumbers ?? []).forEach((t) => {
+        const arr = m.get(t);
+        if (arr) arr.push(k);
+        else m.set(t, [k]);
+      });
+    });
+    return m;
+  }, [photos]);
+
   function commit(next: OrganizeConfig) {
     setCfg(next);
     saveOrganize(next);
+  }
+
+  // Create or update a tag from the menu: set name + color, then bulk-apply it
+  // to every photo of each selected team.
+  function submitTag(
+    mode: 'create' | 'edit',
+    id: string | null,
+    name: string,
+    color: string,
+    teams: Set<string>,
+  ) {
+    const n = name.trim();
+    if (!n) return;
+    let next = cfg;
+    let tagId = id;
+    if (mode === 'create') {
+      next = createTag(next, n, color);
+      tagId = next.tags.find((t) => t.name.toLowerCase() === n.toLowerCase())?.id ?? null;
+    } else if (id) {
+      next = recolorTag(renameTag(next, id, n), id, color);
+    }
+    if (tagId) {
+      for (const team of teams) {
+        next = setTagOnPhotos(next, tagId, teamToKeys.get(team) ?? [], true);
+      }
+    }
+    commit(next);
+    setTagMenu(null);
+  }
+
+  function removeTag(id: string) {
+    commit(deleteTag(cfg, id));
+    if (activeTag === id) setActiveTag(null);
+    setTagMenu(null);
   }
   function flash(msg: string) {
     setNotice(msg);
@@ -271,51 +319,44 @@ export function AlbumDetailClient({
             All
           </button>
           {cfg.tags.map((t) => (
-            <TagPill
-              key={t.id}
-              tag={t}
-              count={photoCountForTag(cfg, t.id)}
-              active={activeTag === t.id}
-              swatchOpen={swatchFor === t.id}
-              onFilter={() => setActiveTag((cur) => (cur === t.id ? null : t.id))}
-              onToggleSwatch={() => setSwatchFor((cur) => (cur === t.id ? null : t.id))}
-              onRecolor={(color) => {
-                commit(recolorTag(cfg, t.id, color));
-                setSwatchFor(null);
-              }}
-              onRename={(name) => commit(renameTag(cfg, t.id, name))}
-              onDelete={() => {
-                commit(deleteTag(cfg, t.id));
-                if (activeTag === t.id) setActiveTag(null);
-              }}
-            />
-          ))}
-          {newTag ? (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                commit(createTag(cfg, newTagName));
-                setNewTagName('');
-                setNewTag(false);
-              }}
-            >
-              <input
-                autoFocus
-                value={newTagName}
-                onChange={(e) => setNewTagName(e.target.value)}
-                onBlur={() => !newTagName.trim() && setNewTag(false)}
-                placeholder="Tag name"
-                className="h-7 w-32 rounded-md border border-border bg-surface px-2 text-xs text-foreground outline-none focus:border-border-hover"
+            <span key={t.id} className="relative">
+              <TagPill
+                tag={t}
+                count={photoCountForTag(cfg, t.id)}
+                active={activeTag === t.id}
+                onFilter={() => setActiveTag((cur) => (cur === t.id ? null : t.id))}
+                onEdit={() => setTagMenu({ mode: 'edit', id: t.id })}
               />
-            </form>
-          ) : (
+              {tagMenu?.mode === 'edit' && tagMenu.id === t.id ? (
+                <TagMenu
+                  mode="edit"
+                  tag={t}
+                  allTeams={allTeams}
+                  teamToKeys={teamToKeys}
+                  onClose={() => setTagMenu(null)}
+                  onSubmit={(name, color, teams) => submitTag('edit', t.id, name, color, teams)}
+                  onDelete={() => removeTag(t.id)}
+                />
+              ) : null}
+            </span>
+          ))}
+          <span className="relative">
             <button
-              onClick={() => setNewTag(true)}
+              onClick={() => setTagMenu(tagMenu?.mode === 'create' ? null : { mode: 'create' })}
               className="inline-flex h-7 items-center gap-1 rounded-md border border-dashed border-border px-2 text-xs text-muted-2 hover:text-foreground"
             >
               <Plus className="h-3 w-3" /> Tag
             </button>
-          )}
+            {tagMenu?.mode === 'create' ? (
+              <TagMenu
+                mode="create"
+                allTeams={allTeams}
+                teamToKeys={teamToKeys}
+                onClose={() => setTagMenu(null)}
+                onSubmit={(name, color, teams) => submitTag('create', null, name, color, teams)}
+              />
+            ) : null}
+          </span>
         </div>
       </div>
 
@@ -576,77 +617,190 @@ function TagPill({
   tag,
   count,
   active,
-  swatchOpen,
   onFilter,
-  onToggleSwatch,
-  onRecolor,
-  onRename,
-  onDelete,
+  onEdit,
 }: {
   tag: Tag;
   count: number;
   active: boolean;
-  swatchOpen: boolean;
   onFilter: () => void;
-  onToggleSwatch: () => void;
-  onRecolor: (color: string) => void;
-  onRename: (name: string) => void;
-  onDelete: () => void;
+  onEdit: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(tag.name);
   return (
     <span
       className={cn(
-        'relative inline-flex h-7 items-center gap-1.5 rounded-md border px-1.5 text-xs transition-colors',
+        'inline-flex h-7 items-center gap-1.5 rounded-md border px-1.5 text-xs transition-colors',
         active ? 'border-foreground/40 bg-surface text-foreground' : 'border-border text-muted',
       )}
     >
       <button
-        onClick={onToggleSwatch}
-        aria-label={`Recolor ${tag.name}`}
-        className="h-3.5 w-3.5 shrink-0 rounded-full ring-1 ring-black/30"
+        onClick={onEdit}
+        aria-label={`Edit ${tag.name}`}
+        className="h-3.5 w-3.5 shrink-0 rounded-full ring-1 ring-black/30 transition-transform hover:scale-110"
         style={{ backgroundColor: tag.color }}
       />
-      {editing ? (
-        <input
-          autoFocus
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => {
-            setEditing(false);
-            if (name.trim() && name !== tag.name) onRename(name);
-            else setName(tag.name);
-          }}
-          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-          className="w-20 bg-transparent text-foreground outline-none"
-        />
-      ) : (
-        <button onClick={onFilter} onDoubleClick={() => setEditing(true)} className="hover:text-foreground">
-          {tag.name}
-          <span className="ml-1 font-mono text-[10px] text-muted-2">{count}</span>
-        </button>
-      )}
-      <button onClick={onDelete} aria-label={`Delete ${tag.name}`} className="text-muted-2 hover:text-foreground">
-        <X className="h-3 w-3" />
+      <button onClick={onFilter} className="hover:text-foreground">
+        {tag.name}
+        <span className="ml-1 font-mono text-[10px] text-muted-2">{count}</span>
       </button>
-      {swatchOpen ? (
-        <div className="absolute left-0 top-8 z-20 flex gap-1 rounded-md border border-border bg-surface-2 p-1.5 shadow-xl">
-          {TAG_PALETTE.map((c) => (
-            <button
-              key={c}
-              onClick={() => onRecolor(c)}
-              aria-label={`Set color ${c}`}
-              className={cn(
-                'h-4 w-4 rounded-full ring-1 ring-black/30',
-                c === tag.color && 'ring-2 ring-foreground',
-              )}
-              style={{ backgroundColor: c }}
-            />
-          ))}
-        </div>
-      ) : null}
     </span>
+  );
+}
+
+// Minimal create/edit popover: name + color + "add teams' photos" (a nested
+// dropdown of every team in the album). On submit the tag is applied to all
+// photos of the chosen teams.
+function TagMenu({
+  mode,
+  tag,
+  allTeams,
+  teamToKeys,
+  onSubmit,
+  onDelete,
+  onClose,
+}: {
+  mode: 'create' | 'edit';
+  tag?: Tag;
+  allTeams: string[];
+  teamToKeys: Map<string, string[]>;
+  onSubmit: (name: string, color: string, teams: Set<string>) => void;
+  onDelete?: () => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(tag?.name ?? '');
+  const [color, setColor] = useState(tag?.color ?? TAG_PALETTE[0]);
+  const [teams, setTeams] = useState<Set<string>>(new Set());
+  const [teamsOpen, setTeamsOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  function toggleTeam(t: string) {
+    setTeams((prev) => {
+      const n = new Set(prev);
+      if (n.has(t)) n.delete(t);
+      else n.add(t);
+      return n;
+    });
+  }
+
+  return (
+    <div
+      ref={ref}
+      className="absolute left-0 top-8 z-30 w-64 rounded-md border border-border bg-surface-2 p-3 shadow-2xl"
+    >
+      <label className="mb-1 block text-[10px] uppercase tracking-wider text-muted-2">Name</label>
+      <input
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') onSubmit(name, color, teams);
+        }}
+        placeholder="Tag name"
+        className="mb-3 h-8 w-full rounded-md border border-border bg-surface px-2 text-sm text-foreground outline-none focus:border-border-hover"
+      />
+
+      <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-2">Color</div>
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        {TAG_PALETTE.map((c) => (
+          <button
+            key={c}
+            onClick={() => setColor(c)}
+            aria-label={`Color ${c}`}
+            className={cn(
+              'h-5 w-5 rounded-full ring-1 ring-black/30',
+              c === color && 'ring-2 ring-offset-1 ring-offset-surface-2 ring-foreground',
+            )}
+            style={{ backgroundColor: c }}
+          />
+        ))}
+      </div>
+
+      {allTeams.length > 0 ? (
+        <>
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-2">
+            Add teams&apos; photos
+          </div>
+          <button
+            onClick={() => setTeamsOpen((o) => !o)}
+            className="mb-2 flex h-8 w-full items-center justify-between rounded-md border border-border bg-surface px-2 text-xs text-foreground hover:border-border-hover"
+          >
+            <span className={teams.size ? 'text-foreground' : 'text-muted-2'}>
+              {teams.size ? `${teams.size} team${teams.size > 1 ? 's' : ''} selected` : 'Select teams'}
+            </span>
+            <ChevronRight className={cn('h-3 w-3 transition-transform', teamsOpen && 'rotate-90')} />
+          </button>
+          {teamsOpen ? (
+            <div className="mb-2 max-h-40 overflow-y-auto rounded-md border border-border">
+              {allTeams.map((t) => {
+                const on = teams.has(t);
+                return (
+                  <button
+                    key={t}
+                    onClick={() => toggleTeam(t)}
+                    className={cn(
+                      'flex w-full items-center justify-between px-2 py-1 text-xs hover:bg-surface',
+                      on ? 'text-foreground' : 'text-muted',
+                    )}
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className={cn(
+                          'inline-flex h-3.5 w-3.5 items-center justify-center rounded border',
+                          on ? 'border-foreground bg-foreground text-accent-fg' : 'border-border',
+                        )}
+                      >
+                        {on ? <Check className="h-2.5 w-2.5" /> : null}
+                      </span>
+                      <span className="font-mono">{t}</span>
+                    </span>
+                    <span className="font-mono text-[10px] text-muted-2">
+                      {teamToKeys.get(t)?.length ?? 0}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      <div className="mt-1 flex items-center justify-between">
+        {mode === 'edit' && onDelete ? (
+          <button onClick={onDelete} className="text-xs text-[#ef4444] hover:opacity-80">
+            Delete
+          </button>
+        ) : (
+          <span />
+        )}
+        <div className="flex items-center gap-2">
+          <button onClick={onClose} className="text-xs text-muted hover:text-foreground">
+            Cancel
+          </button>
+          <button
+            onClick={() => onSubmit(name, color, teams)}
+            disabled={!name.trim()}
+            className="inline-flex h-7 items-center rounded-md bg-foreground px-2.5 text-xs font-medium text-accent-fg disabled:opacity-40"
+          >
+            {mode === 'create' ? 'Create' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
