@@ -11,16 +11,20 @@ export interface Tag {
   id: string;
   name: string;
   color: string; // hex
+  global: boolean; // true = appears in every album + sidebar + Tags page
+  eventId: string | null; // album a non-global tag belongs to (null when global)
+  autoAdd: string[]; // team-number match patterns (e.g. "5503" or "5503A")
 }
 
 export interface Folder {
   id: string;
   name: string;
   parentId: string | null; // null = top level
+  tagId?: string; // set => this folder lives inside a global tag (Tags page only)
 }
 
 export interface OrganizeConfig {
-  version: 2;
+  version: 3;
   tags: Tag[];
   folders: Folder[];
   photoTags: Record<string, string[]>; // photoKey -> tagId[]
@@ -44,7 +48,7 @@ export function photoKey(
 }
 
 export function emptyConfig(): OrganizeConfig {
-  return { version: 2, tags: [], folders: [], photoTags: {}, folderPhotos: {} };
+  return { version: 3, tags: [], folders: [], photoTags: {}, folderPhotos: {} };
 }
 
 function makeId(prefix: string): string {
@@ -60,14 +64,35 @@ function nextColor(cfg: OrganizeConfig): string {
 
 // --- load / save / migrate --------------------------------------------------
 
+// Also the v2->v3 migration point: a tag with no `global` field is v2 data, so
+// mark it global (its old behavior was "shows in every album") to avoid
+// anything disappearing.
 function coerce(parsed: unknown): OrganizeConfig | null {
   if (!parsed || typeof parsed !== 'object') return null;
-  const o = parsed as Partial<OrganizeConfig>;
+  const o = parsed as { tags?: unknown[]; folders?: unknown[]; photoTags?: unknown; folderPhotos?: unknown };
   if (!Array.isArray(o.tags) || !Array.isArray(o.folders)) return null;
+  const tags: Tag[] = o.tags
+    .filter((t): t is Record<string, unknown> => !!t && typeof (t as Tag).name === 'string')
+    .map((t) => ({
+      id: typeof t.id === 'string' ? t.id : makeId('t'),
+      name: t.name as string,
+      color: typeof t.color === 'string' ? t.color : TAG_PALETTE[0],
+      global: typeof t.global === 'boolean' ? t.global : true, // v2 tags -> global
+      eventId: typeof t.eventId === 'string' ? t.eventId : null,
+      autoAdd: Array.isArray(t.autoAdd) ? (t.autoAdd.filter((x) => typeof x === 'string') as string[]) : [],
+    }));
+  const folders: Folder[] = o.folders
+    .filter((f): f is Record<string, unknown> => !!f && typeof (f as Folder).name === 'string')
+    .map((f) => ({
+      id: typeof f.id === 'string' ? f.id : makeId('f'),
+      name: f.name as string,
+      parentId: typeof f.parentId === 'string' ? f.parentId : null,
+      ...(typeof f.tagId === 'string' ? { tagId: f.tagId } : {}),
+    }));
   return {
-    version: 2,
-    tags: o.tags.filter((t) => t && typeof t.name === 'string') as Tag[],
-    folders: o.folders.filter((f) => f && typeof f.name === 'string') as Folder[],
+    version: 3,
+    tags,
+    folders,
     photoTags: (o.photoTags && typeof o.photoTags === 'object' ? o.photoTags : {}) as Record<
       string,
       string[]
@@ -87,7 +112,14 @@ function migrateV1(raw: string): OrganizeConfig | null {
     const cfg = emptyConfig();
     for (const f of v1.folders) {
       if (!f || typeof f.name !== 'string') continue;
-      const tag: Tag = { id: makeId('t'), name: f.name, color: nextColor(cfg) };
+      const tag: Tag = {
+        id: makeId('t'),
+        name: f.name,
+        color: nextColor(cfg),
+        global: true,
+        eventId: null,
+        autoAdd: [],
+      };
       cfg.tags.push(tag);
       for (const key of f.photoKeys ?? []) {
         (cfg.photoTags[key] ??= []).push(tag.id);
@@ -121,10 +153,14 @@ export function loadOrganize(): OrganizeConfig {
   return emptyConfig();
 }
 
+export const ORGANIZE_CHANGED_EVENT = 'aperture:organize-changed';
+
 export function saveOrganize(cfg: OrganizeConfig): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+    // Let other components in this tab (e.g. the sidebar Tags section) refresh.
+    window.dispatchEvent(new CustomEvent(ORGANIZE_CHANGED_EVENT));
   } catch {
     /* quota / serialization — non-fatal */
   }
@@ -132,23 +168,97 @@ export function saveOrganize(cfg: OrganizeConfig): void {
 
 // --- tag ops (pure) ---------------------------------------------------------
 
-export function createTag(cfg: OrganizeConfig, name: string, color?: string): OrganizeConfig {
+export interface TagInput {
+  color?: string;
+  eventId?: string | null;
+  global?: boolean;
+  autoAdd?: string[];
+}
+
+export function createTag(
+  cfg: OrganizeConfig,
+  name: string,
+  opts: TagInput = {},
+): { config: OrganizeConfig; id: string | null } {
   const n = name.trim();
-  if (!n || cfg.tags.some((t) => t.name.toLowerCase() === n.toLowerCase())) return cfg;
+  if (!n) return { config: cfg, id: null };
+  const id = makeId('t');
+  const global = opts.global ?? false;
+  const tag: Tag = {
+    id,
+    name: n,
+    color: opts.color ?? nextColor(cfg),
+    global,
+    eventId: global ? null : opts.eventId ?? null,
+    autoAdd: opts.autoAdd ?? [],
+  };
+  return { config: { ...cfg, tags: [...cfg.tags, tag] }, id };
+}
+
+export function updateTag(
+  cfg: OrganizeConfig,
+  id: string,
+  patch: { name?: string; color?: string; global?: boolean; autoAdd?: string[] },
+): OrganizeConfig {
   return {
     ...cfg,
-    tags: [...cfg.tags, { id: makeId('t'), name: n, color: color ?? nextColor(cfg) }],
+    tags: cfg.tags.map((t) => {
+      if (t.id !== id) return t;
+      const global = patch.global ?? t.global;
+      return {
+        ...t,
+        name: patch.name?.trim() || t.name,
+        color: patch.color ?? t.color,
+        global,
+        eventId: global ? null : t.eventId,
+        autoAdd: patch.autoAdd ?? t.autoAdd,
+      };
+    }),
   };
 }
 
-export function renameTag(cfg: OrganizeConfig, id: string, name: string): OrganizeConfig {
-  const n = name.trim();
-  if (!n) return cfg;
-  return { ...cfg, tags: cfg.tags.map((t) => (t.id === id ? { ...t, name: n } : t)) };
+// Tags visible while viewing album `eventId`: global tags plus tags scoped to
+// this album.
+export function visibleTags(cfg: OrganizeConfig, eventId: string): Tag[] {
+  return cfg.tags.filter((t) => t.global || t.eventId === eventId);
 }
 
-export function recolorTag(cfg: OrganizeConfig, id: string, color: string): OrganizeConfig {
-  return { ...cfg, tags: cfg.tags.map((t) => (t.id === id ? { ...t, color } : t)) };
+export function globalTags(cfg: OrganizeConfig): Tag[] {
+  return cfg.tags.filter((t) => t.global);
+}
+
+// A bare number ("5503") matches that number plus an optional single letter
+// ("5503", "5503A"…"5503Z") but not "55035A". A pattern with a letter ("5503A")
+// matches exactly.
+export function autoAddMatches(team: string, pattern: string): boolean {
+  const p = pattern.trim().toUpperCase();
+  const t = team.trim().toUpperCase();
+  if (!p) return false;
+  if (/^\d+$/.test(p)) return new RegExp(`^${p}[A-Z]?$`).test(t);
+  return t === p;
+}
+
+// Apply every auto-add tag (that's visible in this album) to the album's
+// photos whose team matches. Returns the SAME config when nothing changed, so
+// callers can skip a needless save/re-render.
+export function applyAutoAdd(
+  cfg: OrganizeConfig,
+  eventId: string,
+  photos: { key: string; teams: string[] }[],
+): OrganizeConfig {
+  const photoTags = { ...cfg.photoTags };
+  let changed = false;
+  for (const tag of cfg.tags) {
+    if (!tag.autoAdd.length || !(tag.global || tag.eventId === eventId)) continue;
+    for (const p of photos) {
+      if (!p.teams.some((team) => tag.autoAdd.some((pat) => autoAddMatches(team, pat)))) continue;
+      const cur = photoTags[p.key];
+      if (cur?.includes(tag.id)) continue;
+      photoTags[p.key] = [...(cur ?? []), tag.id];
+      changed = true;
+    }
+  }
+  return changed ? { ...cfg, photoTags } : cfg;
 }
 
 export function deleteTag(cfg: OrganizeConfig, id: string): OrganizeConfig {
@@ -195,10 +305,14 @@ export function createFolder(
   cfg: OrganizeConfig,
   name: string,
   parentId: string | null,
+  tagId?: string,
 ): OrganizeConfig {
   const n = name.trim();
   if (!n) return cfg;
-  return { ...cfg, folders: [...cfg.folders, { id: makeId('f'), name: n, parentId }] };
+  return {
+    ...cfg,
+    folders: [...cfg.folders, { id: makeId('f'), name: n, parentId, ...(tagId ? { tagId } : {}) }],
+  };
 }
 
 export function renameFolder(cfg: OrganizeConfig, id: string, name: string): OrganizeConfig {
@@ -261,9 +375,15 @@ export function removeFromFolder(
   return { ...cfg, folderPhotos };
 }
 
-export function childFolders(cfg: OrganizeConfig, parentId: string | null): Folder[] {
+// Children under `parentId` within a scope: tagId=null => album folders (no
+// tagId); tagId=<id> => folders belonging to that global tag (Tags page).
+export function childFolders(
+  cfg: OrganizeConfig,
+  parentId: string | null,
+  tagId: string | null = null,
+): Folder[] {
   return cfg.folders
-    .filter((f) => f.parentId === parentId)
+    .filter((f) => f.parentId === parentId && (f.tagId ?? null) === tagId)
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
 
@@ -295,7 +415,7 @@ export function autoCreateFoldersFromTags(cfg: OrganizeConfig): OrganizeConfig {
   for (const tag of cfg.tags) {
     const keys = keysByTag.get(tag.id);
     if (!keys?.length) continue;
-    let folder = next.folders.find((f) => f.parentId === null && f.name === tag.name);
+    let folder = next.folders.find((f) => f.parentId === null && !f.tagId && f.name === tag.name);
     if (!folder) {
       next = createFolder(next, tag.name, null);
       folder = next.folders[next.folders.length - 1];

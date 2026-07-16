@@ -558,6 +558,61 @@ export async function getAlbumPhotos(eventId: string): Promise<MediaItem[]> {
   return collapseAlbumPhotos(rows.map(rowToMediaItem));
 }
 
+// Resolve a set of photo keys ("<eventId>/<filename>") to MediaItems, across
+// albums. Used by the Tags page, whose tag→photo membership lives client-side.
+// Collapses per-team rows by (eventId, filename) into one item with teamNumbers.
+export async function getMediaByKeys(keys: string[]): Promise<MediaItem[]> {
+  const pairs = keys
+    .map((k) => {
+      const i = k.indexOf('/');
+      return i > 0 ? { eventId: k.slice(0, i), filename: k.slice(i + 1) } : null;
+    })
+    .filter((p): p is { eventId: string; filename: string } => p !== null);
+  if (pairs.length === 0) return [];
+
+  const collapse = (items: MediaItem[]) => {
+    const groups = new Map<string, MediaItem[]>();
+    const order: string[] = [];
+    for (const it of items) {
+      const key = `${it.eventId ?? '?'}/${it.originalFilename ?? it.id}`;
+      if (!groups.has(key)) {
+        groups.set(key, []);
+        order.push(key);
+      }
+      groups.get(key)!.push(it);
+    }
+    return order.map((key) => {
+      const group = groups.get(key)!;
+      const primary = group[0];
+      const teamNumbers = Array.from(
+        new Set(group.map((m) => m.teamNumber).filter((n): n is string => Boolean(n))),
+      ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      return {
+        ...primary,
+        teamNumber: teamNumbers.length ? teamNumbers.join(' & ') : null,
+        teamNumbers,
+      };
+    });
+  };
+
+  if (shouldUseSeed()) {
+    const want = new Set(pairs.map((p) => `${p.eventId}/${p.filename}`));
+    const rows = SEED_MEDIA.filter((m) => want.has(`${m.eventId ?? '?'}/${m.originalFilename ?? ''}`));
+    return collapse(rows);
+  }
+
+  const db = getDb();
+  const conds = pairs.map((p) =>
+    and(eq(schema.media.eventId, p.eventId), eq(schema.media.originalFilename, p.filename)),
+  );
+  const rows = await db
+    .select()
+    .from(schema.media)
+    .where(and(isNull(schema.media.deletedAt), or(...conds)))
+    .orderBy(schema.media.eventId, schema.media.originalFilename, schema.media.id);
+  return collapse(rows.map(rowToMediaItem));
+}
+
 // ---------------------------------------------------------------------------
 // listTeams — used by the browse page so the right-rail TeamDetailPanel
 // has metadata for any selected card. Not part of the original spec but

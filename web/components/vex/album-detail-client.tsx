@@ -20,6 +20,7 @@ import {
   Tag as TagIcon,
   Users,
   ArrowUpRight,
+  Globe,
 } from 'lucide-react';
 import type { AlbumSummary, MediaItem } from '@/lib/types';
 import { cn, formatDate } from '@/lib/utils';
@@ -31,6 +32,7 @@ import {
   type Tag,
   TAG_PALETTE,
   addToFolder,
+  applyAutoAdd,
   autoCreateFoldersFromTags,
   childFolders,
   createFolder,
@@ -43,18 +45,24 @@ import {
   importConfig,
   loadOrganize,
   moveFolder,
-  photoCountForTag,
   photoKey,
-  recolorTag,
   removeFromFolder,
-  renameTag,
   saveOrganize,
   setTagOnPhotos,
   tagsForPhoto,
+  updateTag,
+  visibleTags,
 } from '@/lib/folders';
 
 const DND = 'application/x-aperture-item';
 type DragPayload = { kind: 'photos'; keys: string[] } | { kind: 'folder'; id: string };
+type TagFormValue = {
+  name: string;
+  color: string;
+  global: boolean;
+  autoAdd: string[];
+  teams: Set<string>;
+};
 type PhotoGroup = {
   key: string;
   label: string;
@@ -184,34 +192,68 @@ export function AlbumDetailClient({
     return m;
   }, [photos]);
 
+  const seedPhotos = useMemo(
+    () => photos.map((p) => ({ key: photoKey(p.eventId, p.originalFilename), teams: p.teamNumbers ?? [] })),
+    [photos],
+  );
+
+  // How many of THIS album's photos carry each tag (global tags may have many
+  // more across other albums, but the chip count should reflect what's here).
+  const albumTagCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const p of photos)
+      for (const id of cfg.photoTags[photoKey(p.eventId, p.originalFilename)] ?? [])
+        m[id] = (m[id] ?? 0) + 1;
+    return m;
+  }, [photos, cfg.photoTags]);
+
+  const shownTags = useMemo(() => visibleTags(cfg, album.id), [cfg, album.id]);
+
   function commit(next: OrganizeConfig) {
     setCfg(next);
     saveOrganize(next);
   }
 
-  // Create or update a tag from the menu: set name + color, then bulk-apply it
-  // to every photo of each selected team.
-  function submitTag(
-    mode: 'create' | 'edit',
-    id: string | null,
-    name: string,
-    color: string,
-    teams: Set<string>,
-  ) {
-    const n = name.trim();
+  // Apply auto-add tags (global or this-album) to matching photos on load and
+  // whenever tags change. applyAutoAdd returns the same ref when nothing
+  // changes, so this settles after one pass (no loop).
+  useEffect(() => {
+    if (!ready) return;
+    const next = applyAutoAdd(cfg, album.id, seedPhotos);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (next !== cfg) commit(next);
+  }, [ready, cfg, seedPhotos, album.id]);
+
+  // Create or update a tag from the menu: name, color, global flag, auto-add
+  // patterns, then bulk-apply it to every photo of each selected team.
+  function submitTag(mode: 'create' | 'edit', id: string | null, v: TagFormValue) {
+    const n = v.name.trim();
     if (!n) return;
     let next = cfg;
     let tagId = id;
     if (mode === 'create') {
-      next = createTag(next, n, color);
-      tagId = next.tags.find((t) => t.name.toLowerCase() === n.toLowerCase())?.id ?? null;
+      const res = createTag(next, n, {
+        color: v.color,
+        eventId: album.id,
+        global: v.global,
+        autoAdd: v.autoAdd,
+      });
+      next = res.config;
+      tagId = res.id;
     } else if (id) {
-      next = recolorTag(renameTag(next, id, n), id, color);
+      next = updateTag(next, id, {
+        name: n,
+        color: v.color,
+        global: v.global,
+        autoAdd: v.autoAdd,
+      });
     }
     if (tagId) {
-      for (const team of teams) {
+      for (const team of v.teams) {
         next = setTagOnPhotos(next, tagId, teamToKeys.get(team) ?? [], true);
       }
+      // Auto-add patterns may match photos in THIS album immediately.
+      next = applyAutoAdd(next, album.id, seedPhotos);
     }
     commit(next);
     setTagMenu(null);
@@ -474,11 +516,11 @@ export function AlbumDetailClient({
           >
             All
           </button>
-          {cfg.tags.map((t) => (
+          {shownTags.map((t) => (
             <span key={t.id} className="relative">
               <TagPill
                 tag={t}
-                count={photoCountForTag(cfg, t.id)}
+                count={albumTagCounts[t.id] ?? 0}
                 active={activeTag === t.id}
                 onFilter={() => setActiveTag((cur) => (cur === t.id ? null : t.id))}
                 onEdit={() => setTagMenu({ mode: 'edit', id: t.id })}
@@ -490,7 +532,7 @@ export function AlbumDetailClient({
                   allTeams={allTeams}
                   teamToKeys={teamToKeys}
                   onClose={() => setTagMenu(null)}
-                  onSubmit={(name, color, teams) => submitTag('edit', t.id, name, color, teams)}
+                  onSubmit={(v) => submitTag('edit', t.id, v)}
                   onDelete={() => removeTag(t.id)}
                 />
               ) : null}
@@ -509,7 +551,7 @@ export function AlbumDetailClient({
                 allTeams={allTeams}
                 teamToKeys={teamToKeys}
                 onClose={() => setTagMenu(null)}
-                onSubmit={(name, color, teams) => submitTag('create', null, name, color, teams)}
+                onSubmit={(v) => submitTag('create', null, v)}
               />
             ) : null}
           </span>
@@ -845,17 +887,17 @@ function TagPill({
         className="h-3.5 w-3.5 shrink-0 rounded-full ring-1 ring-black/30 transition-transform hover:scale-110"
         style={{ backgroundColor: tag.color }}
       />
-      <button onClick={onFilter} className="hover:text-foreground">
+      <button onClick={onFilter} className="inline-flex items-center gap-1 hover:text-foreground">
+        {tag.global ? <Globe className="h-2.5 w-2.5 text-muted-2" aria-label="Global tag" /> : null}
         {tag.name}
-        <span className="ml-1 font-mono text-[10px] text-muted-2">{count}</span>
+        <span className="ml-0.5 font-mono text-[10px] text-muted-2">{count}</span>
       </button>
     </span>
   );
 }
 
-// Minimal create/edit popover: name + color + "add teams' photos" (a nested
-// dropdown of every team in the album). On submit the tag is applied to all
-// photos of the chosen teams.
+// Create/edit popover: name, color, Global toggle, auto-add patterns, and an
+// "add teams' photos" dropdown of every team in the album.
 function TagMenu({
   mode,
   tag,
@@ -869,12 +911,15 @@ function TagMenu({
   tag?: Tag;
   allTeams: string[];
   teamToKeys: Map<string, string[]>;
-  onSubmit: (name: string, color: string, teams: Set<string>) => void;
+  onSubmit: (v: TagFormValue) => void;
   onDelete?: () => void;
   onClose: () => void;
 }) {
   const [name, setName] = useState(tag?.name ?? '');
   const [color, setColor] = useState(tag?.color ?? TAG_PALETTE[0]);
+  const [global, setGlobal] = useState(tag?.global ?? false);
+  const [autoAdd, setAutoAdd] = useState<string[]>(tag?.autoAdd ?? []);
+  const [autoInput, setAutoInput] = useState('');
   const [teams, setTeams] = useState<Set<string>>(new Set());
   const [teamsOpen, setTeamsOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -903,6 +948,16 @@ function TagMenu({
     });
   }
 
+  function commitAutoInput() {
+    const tok = autoInput.trim().toUpperCase();
+    if (/^\d{1,6}[A-Z]?$/.test(tok) && !autoAdd.includes(tok)) setAutoAdd((a) => [...a, tok]);
+    setAutoInput('');
+  }
+
+  function submit() {
+    onSubmit({ name, color, global, autoAdd, teams });
+  }
+
   return (
     <div
       ref={ref}
@@ -914,10 +969,60 @@ function TagMenu({
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') onSubmit(name, color, teams);
+          if (e.key === 'Enter') submit();
         }}
         placeholder="Tag name"
         className="mb-3 h-8 w-full rounded-md border border-border bg-surface px-2 text-sm text-foreground outline-none focus:border-border-hover"
+      />
+
+      <button
+        onClick={() => setGlobal((g) => !g)}
+        className="mb-3 flex w-full items-center gap-2 whitespace-nowrap text-xs text-foreground"
+      >
+        <span
+          className={cn(
+            'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border',
+            global ? 'border-foreground bg-foreground text-accent-fg' : 'border-border',
+          )}
+        >
+          {global ? <Check className="h-3 w-3" /> : null}
+        </span>
+        <Globe className="h-3 w-3 shrink-0 text-muted-2" />
+        <span>Global (show everywhere)</span>
+      </button>
+
+      <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-2">
+        Auto-add teams / numbers
+      </div>
+      <div className="mb-1 flex flex-wrap gap-1">
+        {autoAdd.map((p) => (
+          <span
+            key={p}
+            className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+          >
+            {p}
+            <button
+              onClick={() => setAutoAdd((a) => a.filter((x) => x !== p))}
+              aria-label={`Remove ${p}`}
+              className="text-muted-2 hover:text-foreground"
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
+          </span>
+        ))}
+      </div>
+      <input
+        value={autoInput}
+        onChange={(e) => setAutoInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ',') {
+            e.preventDefault();
+            commitAutoInput();
+          }
+        }}
+        onBlur={commitAutoInput}
+        placeholder="e.g. 5503 or 5503A, then Enter"
+        className="mb-3 h-8 w-full rounded-md border border-border bg-surface px-2 font-mono text-xs text-foreground outline-none focus:border-border-hover"
       />
 
       <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-2">Color</div>
@@ -998,7 +1103,7 @@ function TagMenu({
             Cancel
           </button>
           <button
-            onClick={() => onSubmit(name, color, teams)}
+            onClick={submit}
             disabled={!name.trim()}
             className="inline-flex h-7 items-center rounded-md bg-foreground px-2.5 text-xs font-medium text-accent-fg disabled:opacity-40"
           >

@@ -1,10 +1,12 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { Search, MessageSquare, Images } from 'lucide-react';
+import { Search, MessageSquare, Images, Tag as TagIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { type Tag, ORGANIZE_CHANGED_EVENT, globalTags, loadOrganize } from '@/lib/folders';
 
 const NAV_SCOUT = [
   { href: '/search', label: 'Search', icon: Search },
@@ -63,6 +65,47 @@ function NavGroup({ label, items, pathname }: { label: string; items: typeof NAV
   );
 }
 
+// Sidebar section listing global tags (with their colors). Reads the local
+// store and refreshes live when tags change (custom event) or another tab
+// updates localStorage.
+function TagsNav({ pathname }: { pathname: string }) {
+  const [tags, setTags] = useState<Tag[]>([]);
+  useEffect(() => {
+    const load = () => setTags(globalTags(loadOrganize()));
+    load();
+    window.addEventListener(ORGANIZE_CHANGED_EVENT, load);
+    window.addEventListener('storage', load);
+    return () => {
+      window.removeEventListener(ORGANIZE_CHANGED_EVENT, load);
+      window.removeEventListener('storage', load);
+    };
+  }, []);
+
+  return (
+    <div className="space-y-1">
+      <Link
+        href="/tags"
+        className={cn(
+          'flex items-center gap-2 px-2.5 pb-1 text-[10px] uppercase tracking-wider transition-colors',
+          pathname.startsWith('/tags') ? 'text-foreground' : 'text-muted-2 hover:text-foreground',
+        )}
+      >
+        <TagIcon className="h-3 w-3" /> Tags
+      </Link>
+      {tags.map((t) => (
+        <Link
+          key={t.id}
+          href={`/tags#tag-${t.id}`}
+          className="group flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-muted transition-colors hover:bg-surface hover:text-foreground"
+        >
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-black/30" style={{ backgroundColor: t.color }} />
+          <span className="truncate">{t.name}</span>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? '/';
   // Keep shell present even on detail pages.
@@ -80,6 +123,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </Link>
         <nav className="flex-1 space-y-5 overflow-y-auto p-3">
           <NavGroup label="Scout" items={NAV_SCOUT} pathname={pathname} />
+          <TagsNav pathname={pathname} />
         </nav>
       </aside>
 
