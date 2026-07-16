@@ -70,6 +70,9 @@ export function AlbumDetailClient({
   const [query, setQuery] = useState('');
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [activeTeam, setActiveTeam] = useState<string | null>(null);
+  const [teamsExpanded, setTeamsExpanded] = useState(false);
+  const [teamsOverflow, setTeamsOverflow] = useState(false);
+  const teamsRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null); // folderId | 'crumb:<id|root>'
@@ -83,10 +86,28 @@ export function AlbumDetailClient({
 
   // Seed/load organize state once we know the album's photo→team mapping.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    /* eslint-disable react-hooks/set-state-in-effect */
     setCfg(loadOrganize());
+    try {
+      if (localStorage.getItem('aperture:albums:teamsExpanded') === '1') setTeamsExpanded(true);
+    } catch {
+      /* ignore */
+    }
     setReady(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
+
+  function toggleTeams() {
+    setTeamsExpanded((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem('aperture:albums:teamsExpanded', next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
 
   // Teams are derived from the manifest — a separate, read-only facet.
   const allTeams = useMemo(() => {
@@ -94,6 +115,14 @@ export function AlbumDetailClient({
     photos.forEach((p) => (p.teamNumbers ?? []).forEach((t) => s.add(t)));
     return Array.from(s).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }, [photos]);
+
+  // Detect whether the team chips exceed ~2 rows, so we know to show the
+  // Show-all / Hide controls. scrollHeight is the full content height in either
+  // state, so this holds whether currently expanded or collapsed.
+  useEffect(() => {
+    const el = teamsRef.current;
+    if (el) setTeamsOverflow(el.scrollHeight > 66);
+  }, [allTeams, ready]);
 
   // team -> photo keys, for the tag menu's "add teams' photos" option.
   const teamToKeys = useMemo(() => {
@@ -262,10 +291,26 @@ export function AlbumDetailClient({
       {/* ---- Teams (data-derived, read-only) ---- */}
       {allTeams.length > 0 ? (
         <div className="mb-4">
-          <div className="mb-1.5 flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-2">
-            <Users className="h-3 w-3" /> Teams
+          <div className="mb-1.5 flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-2">
+              <Users className="h-3 w-3" /> Teams
+            </div>
+            {teamsOverflow && teamsExpanded ? (
+              <button
+                onClick={toggleTeams}
+                className="text-[10px] uppercase tracking-wider text-muted-2 hover:text-foreground"
+              >
+                Hide
+              </button>
+            ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div
+            ref={teamsRef}
+            className={cn(
+              'flex flex-wrap items-center gap-1.5',
+              !teamsExpanded && 'max-h-16 overflow-hidden',
+            )}
+          >
             <button
               onClick={() => setActiveTeam(null)}
               className={cn(
@@ -298,6 +343,14 @@ export function AlbumDetailClient({
               </span>
             ))}
           </div>
+          {teamsOverflow && !teamsExpanded ? (
+            <button
+              onClick={toggleTeams}
+              className="mt-1.5 text-xs text-muted transition-colors hover:text-foreground"
+            >
+              Show all teams…
+            </button>
+          ) : null}
         </div>
       ) : null}
 
