@@ -149,13 +149,24 @@ export function BrowseClient({
     : [];
   const selectedTeam = selectedTeams.length ? combineTeams(selectedTeams) : null;
 
-  // Build sibling list for lightbox = same team's media
+  // What ←/→ page through inside the lightbox:
+  //  - a genuinely multi-attachment post → its own attachments
+  //  - anything else → the whole filtered feed, so arrows move post-to-post
+  // NOTE: the grouping step puts an `attachments` array on *every* Discord
+  // item, single ones included (length 1). So only treat it as a multi-image
+  // post when length > 1 — otherwise we'd hand the lightbox a 1-item list and
+  // the arrows would go nowhere (the original bug).
   const lightboxItems = useMemo(() => {
     if (!lightboxId) return [];
-    const m = filtered.find((x) => x.id === lightboxId) ?? groupedItems.find((x) => x.id === lightboxId);
-    if (m?.attachments?.length) return m.attachments;
-    if (!m) return filtered;
-    return [m];
+    const inFeed = filtered.find((x) => x.id === lightboxId);
+    if (inFeed) {
+      return inFeed.attachments && inFeed.attachments.length > 1
+        ? inFeed.attachments
+        : filtered;
+    }
+    const grouped = groupedItems.find((x) => x.id === lightboxId);
+    if (grouped?.attachments && grouped.attachments.length > 1) return grouped.attachments;
+    return grouped ? [grouped] : [];
   }, [lightboxId, filtered, groupedItems]);
 
   return (

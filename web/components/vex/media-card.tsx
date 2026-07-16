@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { Image as ImageIcon, MessageSquare, Paperclip, Play } from 'lucide-react';
+import { MessageSquare, Paperclip, Play } from 'lucide-react';
 import type { MediaItem } from '@/lib/types';
 import { cn, formatDuration, formatRelativeTime } from '@/lib/utils';
 import { TeamNumber } from './team-number';
@@ -33,13 +33,23 @@ export function MediaCard({
       )}
     >
       <div className="relative aspect-[4/3] overflow-hidden rounded-t-lg bg-[#0d0d0d]">
-        <Image
-          src={item.thumbnailUrl}
-          alt={item.teamNumber ? `Team ${item.teamNumber} ${item.contentType}` : 'Untagged media'}
-          fill
-          sizes="(max-width: 768px) 100vw, 33vw"
-          className="object-cover"
-        />
+        {item.contentType === 'video' ? (
+          <video
+            src={`${item.fullUrl}#t=0.1`}
+            preload="metadata"
+            muted
+            playsInline
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <Image
+            src={item.thumbnailUrl}
+            alt={item.teamNumber ? `Team ${item.teamNumber} ${item.contentType}` : 'Untagged media'}
+            fill
+            sizes="(max-width: 768px) 100vw, 33vw"
+            className="object-cover"
+          />
+        )}
         {/* Top-left: content type */}
         <div className="absolute left-2 top-2">
           <ContentTypeBadge type={item.contentType} />
@@ -60,9 +70,6 @@ export function MediaCard({
               <Play className="h-5 w-5 fill-foreground text-foreground" />
             </div>
           </div>
-        ) : null}
-        {item.contentType === 'image' ? (
-          <ImageIcon className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 text-[#2a2a2a]" />
         ) : null}
       </div>
       <div className="flex flex-col gap-2 p-3">

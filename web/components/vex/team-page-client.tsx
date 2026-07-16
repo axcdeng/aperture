@@ -64,39 +64,41 @@ export function TeamPageClient({
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-      <Link
-        href="/browse"
-        className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted hover:text-foreground"
-      >
-        <ChevronLeft className="h-3 w-3" /> Back to feed
-      </Link>
+    <div className="mx-auto w-full max-w-6xl px-4 pb-8 sm:px-6 lg:px-8">
+      <div className="sticky top-0 z-30 -mx-4 bg-background/95 px-4 pb-5 pt-12 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+        <Link
+          href="/browse"
+          className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted hover:text-foreground"
+        >
+          <ChevronLeft className="h-3 w-3" /> Back to feed
+        </Link>
 
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <TeamNumber number={team.number} size="xl" />
-          <h1 className="mt-1 text-lg text-foreground">{team.organization}</h1>
-          <div className="text-xs text-muted">
-            {team.region} · First seen {formatRelativeTime(team.firstSeenAt)}
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <TeamNumber number={team.number} size="xl" />
+            <h1 className="mt-1 text-lg text-foreground">{team.organization}</h1>
+            <div className="text-xs text-muted">
+              {team.region} · First seen {formatRelativeTime(team.firstSeenAt)}
+            </div>
           </div>
-        </div>
-        {tabs.length > 0 ? (
-          <SeasonTabs seasons={tabs} activeId={season} onChange={setSeason} counts={counts} />
-        ) : null}
-      </header>
+          {tabs.length > 0 ? (
+            <SeasonTabs seasons={tabs} activeId={season} onChange={setSeason} counts={counts} />
+          ) : null}
+        </header>
 
-      <div className="mt-6">
-        <StatRow
-          items={[
-            { label: 'Reveals', value: media.length.toString() },
-            {
-              label: 'Last activity',
-              value: media[0] ? formatRelativeTime(media[0].postedAt) : '—',
-            },
-            { label: 'Sources', value: new Set(media.map((m) => m.source)).size.toString() },
-            { label: 'Seasons', value: seasonsPresent.length.toString() },
-          ]}
-        />
+        <div className="mt-6">
+          <StatRow
+            items={[
+              { label: 'Posts', value: media.length.toString() },
+              {
+                label: 'Last activity',
+                value: media[0] ? formatRelativeTime(media[0].postedAt) : '—',
+              },
+              { label: 'Sources', value: new Set(media.map((m) => m.source)).size.toString() },
+              { label: 'Seasons', value: seasonsPresent.length.toString() },
+            ]}
+          />
+        </div>
       </div>
 
       <div className="mt-6">
