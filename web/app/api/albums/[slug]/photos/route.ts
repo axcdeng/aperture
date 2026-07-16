@@ -98,12 +98,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
       if (fullBuf.length > MAX_FULL_BYTES) throw new Error('full image exceeds size limit');
       if (thumbBuf.length > MAX_THUMB_BYTES) throw new Error('thumb exceeds size limit');
 
-      const hash = createHash('sha256').update(fullBuf).digest('hex').slice(0, 8);
+      // Key the R2 object off the FILENAME, not the bytes: the same filename
+      // must always resolve to the same object so a re-upload overwrites in
+      // place and never orphans a stray copy. The key is scoped to this album
+      // via albumFullKey's eventId prefix, so an identical filename in another
+      // album can't collide. The filename hash disambiguates distinct names
+      // that would slugify to the same stem (e.g. "IMG 1" vs "IMG-1").
+      const hash = createHash('sha256').update(filename).digest('hex').slice(0, 8);
       const stem = filename.replace(/\.[^.]+$/, '');
       const keySlug = `${slugify(stem) || 'photo'}-${hash}`;
       const fullKey = albumFullKey(event.id, keySlug);
       const thumbKey = albumThumbKey(event.id, keySlug);
 
+      // Skip re-encode/upload when the object is already there (the common case
+      // for re-imported duplicates); otherwise write it once.
       if (!(await objectExists(fullKey))) await uploadObject(fullKey, fullBuf, 'image/webp');
       if (!(await objectExists(thumbKey))) await uploadObject(thumbKey, thumbBuf, 'image/webp');
 

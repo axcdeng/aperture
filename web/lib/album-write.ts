@@ -86,14 +86,23 @@ async function touchTeam(db: Db, teamNumber: string, postedAt: Date): Promise<vo
     });
 }
 
-// Core idempotent diff for one (event, filename). `teams` is the desired set of
-// normalized team tokens ([] = untagged). Returns stats + the teams touched.
+// Core idempotent diff for one (event, filename), scoped to this album only —
+// an identical filename in another event is a different photo and is never
+// touched. `teams` is the desired set of normalized team tokens ([] = untagged).
+//
+// Non-destructive by default (`removeMissing = false`): it inserts missing team
+// rows, resurrects soft-deleted ones, and refreshes matches, but never removes
+// a team the caller didn't mention. This is what makes re-importing safe — a
+// photo dropped in again (with fewer/no teams) keeps the tags it already had.
+// Removing a tag is not part of import; pass `removeMissing = true` only for an
+// explicit authoritative replace.
 async function diffPhoto(
   db: Db,
   eventId: string,
   filename: string,
   teams: string[],
   template: Template,
+  removeMissing = false,
 ): Promise<{ stats: DiffStats; touched: Set<string> }> {
   const stats = emptyStats();
   const touched = new Set<string>();
@@ -161,12 +170,15 @@ async function diffPhoto(
     }
   }
 
-  // Soft-delete any live row whose team is no longer desired.
-  for (const row of existing) {
-    if (matchedIds.has(row.id) || row.deletedAt) continue;
-    await db.update(schema.media).set({ deletedAt: new Date() }).where(eq(schema.media.id, row.id));
-    stats.softDeleted++;
-    if (row.teamNumber) touched.add(row.teamNumber);
+  // Only in authoritative-replace mode: soft-delete live rows whose team is no
+  // longer desired. Skipped for imports so tags are never silently dropped.
+  if (removeMissing) {
+    for (const row of existing) {
+      if (matchedIds.has(row.id) || row.deletedAt) continue;
+      await db.update(schema.media).set({ deletedAt: new Date() }).where(eq(schema.media.id, row.id));
+      stats.softDeleted++;
+      if (row.teamNumber) touched.add(row.teamNumber);
+    }
   }
 
   return { stats, touched };
@@ -207,7 +219,12 @@ export async function resolveOrCreateEvent(input: {
   return row;
 }
 
-/** Import one just-uploaded photo (R2 keys freshly written). */
+/**
+ * Import one just-uploaded photo (R2 keys freshly written). Idempotent and
+ * non-destructive: re-importing the same filename updates its row(s) in place
+ * and never removes tags, so uploading a photo again — with or without a
+ * tags.json — can't wipe tags it already had.
+ */
 export async function importPhoto(input: {
   eventId: string;
   filename: string;
@@ -234,6 +251,10 @@ export async function importPhoto(input: {
  * Apply tags to a photo already present in the event (bytes in R2). Clones the
  * R2 keys / dims from an existing sibling row. If no row exists for this
  * filename, the entry is skipped (we can't fabricate R2 objects).
+ *
+ * Non-destructive: adds/resurrects the manifest's teams but never removes teams
+ * absent from it, so overlapping or partial tags.json files can't clobber tags
+ * someone else already applied.
  */
 export async function applyTags(input: {
   eventId: string;
