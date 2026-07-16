@@ -1,4 +1,4 @@
-export type Source = 'discord' | 'youtube' | 'vex-cad' | 'robolytics';
+export type Source = 'discord' | 'youtube' | 'vex-cad' | 'robolytics' | 'album';
 
 export type ContentType = 'image' | 'video' | 'youtube';
 
@@ -43,11 +43,28 @@ export interface MediaItem {
   attachmentCount?: number;
   attachments?: MediaItem[];
   teamNumbers?: string[];
+
+  // Album photos (source='album')
+  eventId?: string;
+  originalFilename?: string;
 }
 
 export interface SearchSuggestion {
   team: Team;
   contentCount: number;
+}
+
+// A competition photo album (the `events` table), summarized for the
+// Albums index. `coverUrl` is the R2 thumb of the cover photo.
+export interface AlbumSummary {
+  id: string;
+  name: string;
+  slug: string;
+  date?: string;
+  location?: string;
+  coverUrl?: string;
+  photoCount: number;
+  teamCount: number;
 }
 
 export interface FeedCursor {

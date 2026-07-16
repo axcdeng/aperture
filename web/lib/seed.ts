@@ -193,6 +193,21 @@ function buildAll(): MediaItem[] {
   return items;
 }
 
+// Albums carry no seed/demo content — real albums come from the local
+// importer (scripts/src/import-album.ts). SEED_EVENTS stays exported (empty)
+// so the album data-layer fallbacks resolve to "no albums" under
+// USE_SEED_DATA without special-casing.
+export interface SeedEvent {
+  id: string;
+  name: string;
+  slug: string;
+  date?: string;
+  location?: string;
+  coverOriginalFilename?: string;
+}
+
+export const SEED_EVENTS: SeedEvent[] = [];
+
 export const SEED_MEDIA: MediaItem[] = buildAll();
 
 export const SEED_LAST_SYNC = isoMinusMinutes(4);

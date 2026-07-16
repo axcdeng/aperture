@@ -177,15 +177,17 @@ export function Lightbox({
         </dl>
 
         <div className="mt-5 flex flex-wrap gap-2">
-          <a
-            href={item.originalUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-surface-2 px-3 text-xs hover:border-border-hover"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            Open original
-          </a>
+          {item.originalUrl ? (
+            <a
+              href={item.originalUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-surface-2 px-3 text-xs hover:border-border-hover"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Open original
+            </a>
+          ) : null}
           {item.contentType === 'video' ? (
             <button
               onClick={() => {

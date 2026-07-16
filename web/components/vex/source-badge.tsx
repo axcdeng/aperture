@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 import type { Source } from '@/lib/types';
-import { MessageCircle, Youtube, Box, Activity } from 'lucide-react';
+import { MessageCircle, Youtube, Box, Activity, Images } from 'lucide-react';
 
 const META: Record<
   Source,
@@ -10,6 +10,7 @@ const META: Record<
   youtube: { label: 'YouTube', color: '#FF0000', bg: 'rgba(255,0,0,0.10)', Icon: Youtube },
   'vex-cad': { label: 'VEX CAD', color: '#00B14F', bg: 'rgba(0,177,79,0.12)', Icon: Box },
   robolytics: { label: 'Robolytics', color: '#A855F7', bg: 'rgba(168,85,247,0.12)', Icon: Activity },
+  album: { label: 'Album', color: '#14B8A6', bg: 'rgba(20,184,166,0.12)', Icon: Images },
 };
 
 export function SourceBadge({

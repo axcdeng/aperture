@@ -13,6 +13,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import type {
+  AlbumSummary,
   ContentType,
   FeedCursor,
   MediaItem,
@@ -21,19 +22,19 @@ import type {
   Source,
   Team,
 } from './types';
-import { SEED_LAST_SYNC, SEED_MEDIA, SEED_TEAMS } from './seed';
+import { SEED_EVENTS, SEED_LAST_SYNC, SEED_MEDIA, SEED_TEAMS } from './seed';
 import { getDb, schema } from './db/client';
 import type { Media as DbMedia, Team as DbTeam } from './db/schema';
 import { r2PublicUrl } from './r2';
 
 // ---------------------------------------------------------------------------
-// Toggle: when USE_SEED_DATA=true (or DATABASE_URL is missing), all functions
-// fall back to the in-repo seed so the UI demos cleanly without a DB.
+// Toggle: seed data is an *explicit* opt-in via USE_SEED_DATA=true. We do NOT
+// fall back to it just because DATABASE_URL is unset — that once let a
+// misconfigured deploy silently serve fabricated demo data. With the fallback
+// gone, a missing DATABASE_URL surfaces as a loud error from getDb() instead.
 // ---------------------------------------------------------------------------
 function shouldUseSeed(): boolean {
-  if (process.env.USE_SEED_DATA === 'true') return true;
-  if (!process.env.DATABASE_URL) return true;
-  return false;
+  return process.env.USE_SEED_DATA === 'true';
 }
 
 // Discord messages often contain raw URLs, mention tokens like <@123>, custom
@@ -77,6 +78,13 @@ function rowToMediaItem(m: DbMedia): MediaItem {
     fullUrl = `https://www.youtube.com/embed/${m.youtubeVideoId}`;
     thumbnailUrl =
       m.cdnThumbUrl ?? `https://i.ytimg.com/vi/${m.youtubeVideoId}/hqdefault.jpg`;
+  } else if (m.source === 'album') {
+    // Album photos always live in R2: r2Key = ~480px thumb, r2FullKey =
+    // ~1080px display. Fall back to the thumb if the full is missing.
+    const thumb = r2PublicUrl(m.r2Key);
+    const full = r2PublicUrl(m.r2FullKey);
+    thumbnailUrl = thumb ?? full ?? '';
+    fullUrl = full ?? thumb ?? '';
   } else if (m.source === 'discord' && r2Url && m.contentType === 'image') {
     fullUrl = r2Url;
     thumbnailUrl = r2Url;
@@ -110,6 +118,8 @@ function rowToMediaItem(m: DbMedia): MediaItem {
           ? `https://discord.com/channels/@me/${m.discordChannelId}/${m.discordMessageId}`
           : '',
     authorDisplayName: m.authorDisplayName ?? undefined,
+    eventId: m.eventId ?? undefined,
+    originalFilename: m.originalFilename ?? undefined,
   };
 }
 
@@ -368,6 +378,41 @@ export async function getUntaggedMedia(): Promise<MediaItem[]> {
 }
 
 // ---------------------------------------------------------------------------
+// assignMediaToTeam — tag an untagged media row with a team number. The team
+// is upserted (created with just its number if we haven't scraped it yet) so
+// scouts can tag reveals for teams that aren't in the table yet; the richer
+// metadata fills in later from a scrape.
+// ---------------------------------------------------------------------------
+export async function assignMediaToTeam(mediaId: string, rawTeamNumber: string): Promise<void> {
+  const teamNumber = rawTeamNumber.trim().toUpperCase();
+  if (!teamNumber) throw new Error('Team number is required.');
+  if (shouldUseSeed()) {
+    throw new Error('Cannot assign media in seed mode — connect a database.');
+  }
+  const db = getDb();
+  await db.insert(schema.teams).values({ teamNumber }).onConflictDoNothing();
+  await db
+    .update(schema.media)
+    .set({ teamNumber })
+    .where(and(eq(schema.media.id, mediaId), isNull(schema.media.deletedAt)));
+}
+
+// ---------------------------------------------------------------------------
+// dismissMedia — "Not a reveal": soft-delete so it drops out of every query
+// (all reads filter on deletedAt IS NULL), including the untagged queue.
+// ---------------------------------------------------------------------------
+export async function dismissMedia(mediaId: string): Promise<void> {
+  if (shouldUseSeed()) {
+    throw new Error('Cannot dismiss media in seed mode — connect a database.');
+  }
+  const db = getDb();
+  await db
+    .update(schema.media)
+    .set({ deletedAt: new Date() })
+    .where(and(eq(schema.media.id, mediaId), isNull(schema.media.deletedAt)));
+}
+
+// ---------------------------------------------------------------------------
 // getMediaItem
 // ---------------------------------------------------------------------------
 export async function getMediaItem(id: string): Promise<MediaItem | null> {
@@ -381,6 +426,136 @@ export async function getMediaItem(id: string): Promise<MediaItem | null> {
     .where(and(eq(schema.media.id, id), isNull(schema.media.deletedAt)))
     .limit(1);
   return row ? rowToMediaItem(row) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Albums (the `events` table). Album photos are `media` rows with
+// source='album'; a multi-team photo is several rows sharing
+// (event_id, original_filename). The album views collapse those rows by
+// filename into one MediaItem carrying teamNumbers[].
+// ---------------------------------------------------------------------------
+
+// Collapse per-team album rows into one MediaItem per photo (keyed by
+// original_filename), gathering every team tag into teamNumbers[].
+function collapseAlbumPhotos(items: MediaItem[]): MediaItem[] {
+  const groups = new Map<string, MediaItem[]>();
+  const order: string[] = [];
+  for (const item of items) {
+    const key = item.originalFilename ?? item.id;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      order.push(key);
+    }
+    groups.get(key)!.push(item);
+  }
+  return order.map((key) => {
+    const group = groups.get(key)!;
+    const primary = group[0];
+    const teamNumbers = Array.from(
+      new Set(group.map((m) => m.teamNumber).filter((n): n is string => Boolean(n))),
+    ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return {
+      ...primary,
+      teamNumber: teamNumbers.length ? teamNumbers.join(' & ') : null,
+      teamNumbers,
+    };
+  });
+}
+
+function seedAlbumSummary(e: (typeof SEED_EVENTS)[number]): AlbumSummary {
+  const photos = SEED_MEDIA.filter((m) => m.eventId === e.id);
+  const filenames = new Set(photos.map((m) => m.originalFilename));
+  const teams = new Set(
+    photos.map((m) => m.teamNumber).filter((n): n is string => Boolean(n)),
+  );
+  const cover =
+    photos.find((m) => m.originalFilename === e.coverOriginalFilename) ?? photos[0];
+  return {
+    id: e.id,
+    name: e.name,
+    slug: e.slug,
+    date: e.date,
+    location: e.location,
+    coverUrl: cover?.thumbnailUrl,
+    photoCount: filenames.size,
+    teamCount: teams.size,
+  };
+}
+
+export async function listAlbums(): Promise<AlbumSummary[]> {
+  if (shouldUseSeed()) {
+    return SEED_EVENTS.map(seedAlbumSummary).sort((a, b) =>
+      (b.date ?? '').localeCompare(a.date ?? ''),
+    );
+  }
+
+  const db = getDb();
+  const evs = await db
+    .select()
+    .from(schema.events)
+    .orderBy(desc(schema.events.date), desc(schema.events.createdAt));
+
+  const summaries: AlbumSummary[] = [];
+  for (const e of evs) {
+    const [agg] = await db
+      .select({
+        // count(distinct filename) = photos; count(distinct team) excludes
+        // NULL, so untagged photos don't inflate the team count.
+        photoCount: sql<number>`count(distinct ${schema.media.originalFilename})`,
+        teamCount: sql<number>`count(distinct ${schema.media.teamNumber})`,
+      })
+      .from(schema.media)
+      .where(and(eq(schema.media.eventId, e.id), isNull(schema.media.deletedAt)));
+
+    const [cover] = await db
+      .select({ r2Key: schema.media.r2Key, r2FullKey: schema.media.r2FullKey })
+      .from(schema.media)
+      .where(
+        and(
+          eq(schema.media.eventId, e.id),
+          isNull(schema.media.deletedAt),
+          e.coverOriginalFilename
+            ? eq(schema.media.originalFilename, e.coverOriginalFilename)
+            : sql`true`,
+        ),
+      )
+      .limit(1);
+
+    summaries.push({
+      id: e.id,
+      name: e.name,
+      slug: e.slug,
+      date: e.date?.toISOString(),
+      location: e.location ?? undefined,
+      coverUrl: r2PublicUrl(cover?.r2Key ?? cover?.r2FullKey) ?? undefined,
+      photoCount: Number(agg?.photoCount ?? 0),
+      teamCount: Number(agg?.teamCount ?? 0),
+    });
+  }
+  return summaries;
+}
+
+export async function getAlbum(slug: string): Promise<AlbumSummary | null> {
+  if (shouldUseSeed()) {
+    const e = SEED_EVENTS.find((ev) => ev.slug.toLowerCase() === slug.toLowerCase());
+    return e ? seedAlbumSummary(e) : null;
+  }
+  const albums = await listAlbums();
+  return albums.find((a) => a.slug.toLowerCase() === slug.toLowerCase()) ?? null;
+}
+
+export async function getAlbumPhotos(eventId: string): Promise<MediaItem[]> {
+  if (shouldUseSeed()) {
+    const rows = SEED_MEDIA.filter((m) => m.eventId === eventId);
+    return collapseAlbumPhotos(rows);
+  }
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(schema.media)
+    .where(and(eq(schema.media.eventId, eventId), isNull(schema.media.deletedAt)))
+    .orderBy(schema.media.originalFilename, schema.media.id);
+  return collapseAlbumPhotos(rows.map(rowToMediaItem));
 }
 
 // ---------------------------------------------------------------------------
