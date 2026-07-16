@@ -42,7 +42,6 @@ import {
   emptyConfig,
   exportConfig,
   folderPath,
-  importConfig,
   loadOrganize,
   moveFolder,
   photoKey,
@@ -101,7 +100,6 @@ export function AlbumDetailClient({
     null,
   );
   const [notice, setNotice] = useState<string | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   // Seed/load organize state once we know the album's photo→team mapping.
   useEffect(() => {
@@ -669,25 +667,6 @@ export function AlbumDetailClient({
             }}
           />
           <ToolbarButton icon={Download} label="Export" onClick={() => doExport(cfg)} />
-          <ToolbarButton icon={Upload} label="Import" onClick={() => fileInput.current?.click()} />
-          <input
-            ref={fileInput}
-            type="file"
-            accept="application/json,.json"
-            className="hidden"
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              e.target.value = '';
-              if (!f) return;
-              const replace = window.confirm(
-                'Replace your organization with the imported set?\n\nOK = replace · Cancel = merge.',
-              );
-              const next = importConfig(cfg, await f.text(), replace ? 'replace' : 'merge');
-              if (!next) return flash('Not a valid export file.');
-              commit(next);
-              flash(replace ? 'Replaced' : 'Merged');
-            }}
-          />
           {notice ? <span className="text-xs text-muted">{notice}</span> : null}
         </div>
       </div>
