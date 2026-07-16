@@ -12,7 +12,6 @@ import {
   serial,
   index,
   uniqueIndex,
-  unique,
 } from 'drizzle-orm/pg-core';
 
 // ---------------------------------------------------------------------------
@@ -125,15 +124,13 @@ export const media = pgTable(
     uniqueIndex('media_youtube_dedupe_idx').on(t.youtubeVideoId, t.teamNumber),
     // Album lookups: collapse a photo's per-team rows by (event, filename).
     index('media_event_file_idx').on(t.eventId, t.originalFilename),
-    // Album dedupe per (event, filename, team). A UNIQUE CONSTRAINT (not a
-    // unique index) because only the constraint builder exposes
-    // .nullsNotDistinct() in drizzle 0.45.2 — needed so untagged rows
-    // (team_number = NULL) also dedupe; otherwise a re-import would insert a
-    // fresh untagged row every time. Defensive guard: the importer also does
-    // an explicit SELECT-diff-write and never relies on onConflict.
-    unique('media_album_dedupe_idx')
-      .on(t.eventId, t.originalFilename, t.teamNumber)
-      .nullsNotDistinct(),
+    // NOTE: no DB-level album dedupe constraint. A UNIQUE ... NULLS NOT
+    // DISTINCT over (event_id, original_filename, team_number) would collide
+    // on the many existing non-album rows (event_id/original_filename NULL +
+    // duplicate team_number), and a partial + NULLS-NOT-DISTINCT unique index
+    // isn't expressible via drizzle 0.45.2's builders. The importer instead
+    // guarantees idempotency with an explicit SELECT-diff-write per
+    // (event_id, original_filename).
   ],
 );
 
