@@ -10,10 +10,35 @@
 // not reload). So we don't read the DOM once — we observe it and (re)resolve
 // the album context on every change.
 (function () {
+  // Let the site know the extension is present (it hides/hint its bulk-download
+  // buttons accordingly).
+  document.documentElement.setAttribute('data-aperture-ext', '1');
+
   let albumUrl = null;
   let albumId = null;
   let cacheKey = null;
   let harvestedThisView = false; // did we run a full harvest for this album already?
+
+  // Minimal toast for bulk-download progress (downloads run in the background
+  // worker, so there's no button label to update).
+  let toastEl = null;
+  const toast = (msg, ms) => {
+    if (!toastEl) {
+      toastEl = document.createElement('div');
+      Object.assign(toastEl.style, {
+        position: 'fixed', bottom: '16px', right: '16px', zIndex: '2147483647',
+        font: '600 12px system-ui, sans-serif', padding: '8px 12px', borderRadius: '8px',
+        background: 'rgba(0,0,0,.85)', color: '#fff', maxWidth: '320px',
+        boxShadow: '0 4px 16px rgba(0,0,0,.4)',
+      });
+      document.body.appendChild(toastEl);
+    }
+    toastEl.textContent = msg;
+    toastEl.style.opacity = '1';
+    if (ms) setTimeout(() => { if (toastEl) toastEl.style.opacity = '0'; }, ms);
+  };
+  const safeName = (s) =>
+    (s || '').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'group';
 
   // (Re)resolve which album this page is currently showing. Returns false when
   // the album root / its alltuu URL isn't in the DOM yet (still rendering, or a
@@ -110,6 +135,46 @@
     btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openFull(filename, btn); });
     tile.appendChild(btn);
   };
+
+  // Bulk download a group/selection the site hands us. Payload (JSON string in
+  // event.detail, to survive the page↔content-script world boundary):
+  //   { tier: 'full'|'site', label, items: [{ filename, imgUrl }] }
+  // full → 4000px alltuu originals (via the harvested index); site → the 1080px
+  // display URLs the site already has. Each group lands in its own
+  // ~/Downloads/<albumSlug>_<label>/ folder.
+  const onBulkDownload = async (e) => {
+    let payload; try { payload = JSON.parse(e.detail); } catch { return; }
+    const { tier, label } = payload;
+    const items = payload.items || [];
+    if (!items.length) return;
+
+    refreshCtx();
+    const slug = (document.querySelector('[data-aperture-album]') || {})
+      .getAttribute?.('data-album-slug') || albumId || 'album';
+    const folder = safeName(slug) + '_' + safeName(label);
+
+    let list;
+    if (tier === 'full') {
+      toast('Preparing full-size…');
+      let c = await readFresh();
+      if (!c && !harvestedThisView) {
+        harvestedThisView = true;
+        c = await runHarvest((s) => toast('Harvesting album… ' + s + 's'));
+      }
+      const map = c ? c.map : null;
+      list = items.map((it) => ({ name: it.filename, url: lookup(map, it.filename) })).filter((x) => x.url);
+      if (!list.length) { toast('Couldn\'t resolve originals — try again after it harvests.', 4000); return; }
+    } else {
+      list = items.map((it) => ({ name: it.filename, url: it.imgUrl })).filter((x) => x.name && x.url);
+      if (!list.length) { toast('Nothing to download.', 3000); return; }
+    }
+
+    toast('Downloading ' + list.length + ' → Downloads/' + folder + ' …');
+    const res = await chrome.runtime.sendMessage({ type: 'bulkDownload', folder, items: list });
+    const ok = res ? res.ok : list.length, fail = res ? res.fail : 0;
+    toast('Done: ' + ok + ' → Downloads/' + folder + (fail ? '  (' + fail + ' failed)' : ''), 6000);
+  };
+  window.addEventListener('aperture:bulk-download', onBulkDownload);
 
   let scanQueued = false;
   const scan = () => {

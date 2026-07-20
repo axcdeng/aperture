@@ -27,6 +27,7 @@ import { cn, formatDate } from '@/lib/utils';
 import { Lightbox } from './lightbox';
 import { EmptyState } from './empty-state';
 import { TeamNumber } from './team-number';
+import { BulkDownload } from './bulk-download';
 import {
   type OrganizeConfig,
   type Tag,
@@ -730,9 +731,12 @@ export function AlbumDetailClient({
               Remove from folder
             </button>
           ) : null}
-          <button onClick={() => setSelected(new Set())} className="ml-auto text-muted-2 hover:text-foreground">
-            Clear
-          </button>
+          <span className="ml-auto flex items-center gap-3">
+            <BulkDownload items={selKeys.map((k) => byKey.get(k)).filter(Boolean) as MediaItem[]} label="selected" />
+            <button onClick={() => setSelected(new Set())} className="text-muted-2 hover:text-foreground">
+              Clear
+            </button>
+          </span>
         </div>
       ) : null}
 
@@ -767,7 +771,8 @@ export function AlbumDetailClient({
       {/* ---- Photos section ---- */}
       <div className="mb-2 flex items-center justify-between">
         <SectionLabel>{folderId === null ? 'Photos' : 'In this folder'}</SectionLabel>
-        <div className="flex items-center gap-0.5 text-muted-2">
+        <div className="flex items-center gap-2 text-muted-2">
+          <BulkDownload items={visiblePhotos} label={folderId ? 'folder' : query ? 'search' : 'all'} />
           <button
             onClick={() => changeCols(-1)}
             disabled={cols <= 2}
@@ -1242,12 +1247,15 @@ function GroupedView({
                 )}
                 <span className="font-mono text-[10px] text-muted-2">{g.photos.length}</span>
               </div>
-              <button
-                onClick={() => onToggleGroup(g.key)}
-                className="text-xs text-muted transition-colors hover:text-foreground"
-              >
-                {expanded ? 'Show less' : `Show all (${g.photos.length})`}
-              </button>
+              <span className="flex items-center gap-3 text-xs">
+                <BulkDownload items={g.photos} label={g.label} />
+                <button
+                  onClick={() => onToggleGroup(g.key)}
+                  className="text-muted transition-colors hover:text-foreground"
+                >
+                  {expanded ? 'Show less' : `Show all (${g.photos.length})`}
+                </button>
+              </span>
             </div>
             {expanded ? (
               <div

@@ -94,6 +94,22 @@ async function doDownload(photos, folder, field) {
   return { queued, skipped, invalid, folder, total: photos.length };
 }
 
+async function bulkDownload(folder, items) {
+  let ok = 0, fail = 0;
+  for (const it of items) {
+    if (!it || !it.url || !it.name || !/^[A-Za-z0-9._-]+$/.test(it.name)) { fail++; continue; }
+    try {
+      await new Promise((res) => {
+        chrome.downloads.download(
+          { url: it.url, filename: folder + '/' + it.name, conflictAction: 'overwrite' },
+          (id) => { if (chrome.runtime.lastError || id === undefined) fail++; else ok++; res(); },
+        );
+      });
+    } catch (e) { fail++; }
+  }
+  return { ok, fail, folder };
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'download') {
     doDownload(msg.photos || [], msg.folder, msg.field).then(sendResponse);
@@ -101,6 +117,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === 'progress') {
     progress(msg.folder, msg.total || 0).then(sendResponse);
+    return true;
+  }
+  // Bulk download an explicit [{name, url}] list into <folder>/ (used by the
+  // Aperture site's per-group / selection download buttons).
+  if (msg.type === 'bulkDownload') {
+    bulkDownload(msg.folder, msg.items || []).then(sendResponse);
     return true;
   }
   // --- View-full-size harvest window lifecycle -----------------------------
