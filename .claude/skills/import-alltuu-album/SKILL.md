@@ -22,6 +22,13 @@ Inputs: an album URL like
 If the folder already exists, this resumes: already-downloaded files (matched by
 filename) are never re-fetched.
 
+> **Token-free alternative for Phases 1–2:** the operator can instead run the
+> **Chrome extension** at `tools/alltuu-downloader/` (Load unpacked → Harvest →
+> Download all). It harvests + bulk-downloads entirely in the browser to
+> `~/Downloads/<folder>/` with no agent involvement; they then
+> `mv ~/Downloads/<folder>/* Albums/<folder>/` and you pick up at Phase 3
+> (tagging). Use this skill's browser+`download.sh` path when driving it yourself.
+
 ## Why the browser (and why it's still fast)
 
 The photo list comes from `https://v4c.alltuu.com/<sig>/…/rest/v4c/fplN/…/s<offset>/…`.

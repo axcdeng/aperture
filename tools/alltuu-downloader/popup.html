@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root { color-scheme: light dark; }
+    body { width: 320px; margin: 0; font: 13px/1.45 -apple-system, system-ui, sans-serif; padding: 14px; }
+    h1 { font-size: 14px; margin: 0 0 10px; }
+    label { display: block; margin: 8px 0 3px; font-weight: 600; }
+    input, select { width: 100%; box-sizing: border-box; padding: 6px; font-size: 13px; }
+    .row { display: flex; gap: 8px; margin-top: 12px; }
+    button { flex: 1; padding: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border-radius: 6px; border: 1px solid #8884; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    #harvest { background: #2970ff; color: #fff; border-color: #2970ff; }
+    #download { background: #16a34a; color: #fff; border-color: #16a34a; }
+    #status { margin-top: 12px; padding: 8px; border-radius: 6px; background: #8881; min-height: 32px; white-space: pre-wrap; }
+    .hint { color: #8889; font-size: 11px; margin-top: 8px; }
+    .bar { height: 6px; background: #8883; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+    .bar > i { display: block; height: 100%; width: 0; background: #16a34a; transition: width .3s; }
+  </style>
+</head>
+<body>
+  <h1>Alltuu Album Downloader</h1>
+
+  <label for="folder">Folder name (under ~/Downloads/)</label>
+  <input id="folder" placeholder="e.g. WRCT_Beijing" />
+
+  <label for="tier">Resolution</label>
+  <select id="tier">
+    <option value="bl">1600px medium (bl) — recommended</option>
+    <option value="url1920">1620×1080 (url1920)</option>
+    <option value="ol">4000px original (ol) — big</option>
+  </select>
+
+  <div class="row">
+    <button id="harvest">1. Harvest feed</button>
+    <button id="download" disabled>2. Download all</button>
+  </div>
+
+  <div class="bar"><i id="fill"></i></div>
+  <div id="status">Open an alltuu album, switch to 图片直播, then click Harvest.</div>
+  <div class="hint">Keep this popup open while harvesting. Downloads continue in the background even if you close it. Skips photos already downloaded into the same folder.</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
