@@ -81,10 +81,38 @@ $('#harvest').onclick = async () => {
   const d = await tabMsg('dump');
   photos = (d && d.photos) || [];
   if (!$('#folder').value) $('#folder').value = suggestFolder(d && d.title);
-  setStatus('Harvested ' + photos.length + ' photos. Set a folder name, then Download all.');
+
+  // Also save the "View full size" index for the Aperture site, so clicking a
+  // photo there is instant (no on-demand background harvest). This reuses the
+  // full harvest we just did — re-harvesting later (e.g. after the event adds
+  // photos) refreshes the whole map, including fresh signatures.
+  const indexed = await saveViewIndex(photos);
+
+  setStatus('Harvested ' + photos.length + ' photos'
+    + (indexed ? ' — indexed ' + indexed + ' for instant View full size' : '')
+    + '. Set a folder name, then Download all.');
   $('#download').disabled = photos.length === 0;
   $('#harvest').disabled = false;
 };
+
+// Write filename→original-URL into chrome.storage under the current album's id,
+// the same cache the Aperture "View full size" button reads.
+async function saveViewIndex(list) {
+  const tab = await activeTab();
+  const id = (tab && tab.url && tab.url.match(/[a-f0-9]{32}/i) || [])[0];
+  if (!id) return 0;
+  const map = {};
+  for (const p of list) {
+    const full = p.ol || p.url1920 || p.bl; // prefer the 4000px original
+    if (p.n && full) map[p.n] = full;
+  }
+  const count = Object.keys(map).length;
+  if (count) {
+    const expires = Date.now() + 25 * 24 * 60 * 60 * 1000; // ~OSS signature life
+    await chrome.storage.local.set({ ['album:' + id]: { expires, map, count } });
+  }
+  return count;
+}
 
 $('#download').onclick = async () => {
   const folder = ($('#folder').value || 'album').trim().replace(/[^A-Za-z0-9._-]/g, '_');
