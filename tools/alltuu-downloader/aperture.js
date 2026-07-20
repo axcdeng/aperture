@@ -4,17 +4,33 @@
 // alltuu album (in a background tab) and cached in chrome.storage (~25 days,
 // bounded by the OSS signature lifetime), so every click after the first is
 // instant.
+//
+// The album page is a client-rendered React component that mounts AFTER this
+// script runs (document_idle), and it's an SPA (navigating between albums does
+// not reload). So we don't read the DOM once — we observe it and (re)resolve
+// the album context on every change.
 (function () {
-  const root = document.querySelector('[data-aperture-album]');
-  if (!root) return; // not an album page
-  const albumUrl = root.getAttribute('data-alltuu-album-url') || '';
-  if (!albumUrl) return; // this album has no linked alltuu source
+  let albumUrl = null;
+  let albumId = null;
+  let cacheKey = null;
 
-  const albumId = (albumUrl.match(/[a-f0-9]{32}/i) || [albumUrl])[0];
-  const CACHE_KEY = 'album:' + albumId;
+  // (Re)resolve which album this page is currently showing. Returns false when
+  // the album root / its alltuu URL isn't in the DOM yet (still rendering, or a
+  // non-album page). Safe to call repeatedly.
+  function refreshCtx() {
+    const root = document.querySelector('[data-aperture-album]');
+    const u = root && root.getAttribute('data-alltuu-album-url');
+    if (!u) { albumUrl = null; return false; }
+    if (u !== albumUrl) {
+      albumUrl = u;
+      albumId = (u.match(/[a-f0-9]{32}/i) || [u])[0];
+      cacheKey = 'album:' + albumId;
+    }
+    return true;
+  }
 
   const readCache = () =>
-    new Promise((res) => chrome.storage.local.get(CACHE_KEY, (o) => res(o[CACHE_KEY] || null)));
+    new Promise((res) => chrome.storage.local.get(cacheKey, (o) => res(o[cacheKey] || null)));
 
   const freshMap = async () => {
     const c = await readCache();
@@ -65,10 +81,10 @@
     btn.textContent = 'View full size';
     btn.setAttribute('data-vfs-btn', '');
     Object.assign(btn.style, {
-      position: 'absolute', top: '6px', right: '6px', zIndex: '20',
+      position: 'absolute', top: '6px', right: '6px', zIndex: '30',
       font: '600 11px system-ui, sans-serif', padding: '3px 7px', borderRadius: '5px',
       border: 'none', background: 'rgba(0,0,0,.72)', color: '#fff', cursor: 'pointer',
-      opacity: '0', transition: 'opacity .15s',
+      opacity: '0', transition: 'opacity .15s', pointerEvents: 'auto',
     });
     tile.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
     tile.addEventListener('mouseleave', () => { btn.style.opacity = '0'; });
@@ -76,9 +92,19 @@
     tile.appendChild(btn);
   };
 
-  const scan = () => document.querySelectorAll('[data-original-filename]').forEach(addButton);
+  let scanQueued = false;
+  const scan = () => {
+    scanQueued = false;
+    if (!refreshCtx()) return; // album/url not in DOM yet — wait for next change
+    document.querySelectorAll('[data-original-filename]').forEach(addButton);
+  };
+  const queueScan = () => {
+    if (scanQueued) return;
+    scanQueued = true;
+    requestAnimationFrame(scan); // debounce bursts of React mutations
+  };
 
-  // Tiles render lazily / on view changes — keep injecting as they appear.
-  scan();
-  new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
+  // Observe from the start; the album content mounts and re-renders later.
+  queueScan();
+  new MutationObserver(queueScan).observe(document.documentElement, { childList: true, subtree: true });
 })();
