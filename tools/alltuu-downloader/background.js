@@ -10,6 +10,19 @@ function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 // albumId -> background tabId currently harvesting (dedupe concurrent opens).
 const harvestTabs = {};
 
+// Alltuu albums open on the "popular" tab (menu=hot, ~50 photos). Force the
+// live feed (menu=live) so we harvest the whole album. Also drops any hash.
+function normalizeLive(u) {
+  try {
+    const url = new URL(u);
+    url.hash = '';
+    url.searchParams.set('menu', 'live');
+    return url.toString();
+  } catch (e) {
+    return u;
+  }
+}
+
 function folderRegex(folder) {
   // Match ".../<folder>/<basename>" on both / and \ path separators.
   return new RegExp('[\\\\/]' + escapeRe(folder) + '[\\\\/]([^\\\\/]+)$');
@@ -87,7 +100,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // polling storage, so this is best-effort tab management, not the data path.
   if (msg.type === 'openHarvestTab') {
     if (!harvestTabs[msg.albumId]) {
-      const url = msg.url.split('#')[0] + '#__aph';
+      // Force the live feed (full album), not the ~50-photo popular tab.
+      const url = normalizeLive(msg.url) + '#__aph';
       chrome.tabs.create({ url, active: false }, (tab) => {
         if (tab) harvestTabs[msg.albumId] = tab.id;
       });

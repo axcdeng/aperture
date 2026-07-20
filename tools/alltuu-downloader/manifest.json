@@ -1,36 +1,55 @@
 {
   "manifest_version": 3,
   "name": "Alltuu Album Fast Downloader",
-  "version": "1.1.0",
-  "description": "Bulk-download an alltuu/piufoto album in parallel, and add a 'View full size' button to Aperture album photos — no agent, no tokens.",
-  "permissions": ["downloads", "tabs", "storage"],
+  "version": "1.1.2",
+  "description": "Bulk-download an alltuu/piufoto album in parallel, and add a 'View full size' button to Aperture album photos \u2014 no agent, no tokens.",
+  "permissions": [
+    "downloads",
+    "tabs",
+    "storage"
+  ],
   "host_permissions": [
     "https://m.alltuu.com/*",
     "https://*.alltuu.com/*",
     "http://localhost:6606/*",
     "https://aperture-peach.vercel.app/*"
   ],
-  "background": { "service_worker": "background.js" },
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "Alltuu Album Downloader"
   },
   "content_scripts": [
     {
-      "matches": ["https://m.alltuu.com/album/*"],
-      "js": ["hook.js"],
+      "matches": [
+        "https://m.alltuu.com/album/*"
+      ],
+      "js": [
+        "hook.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["https://m.alltuu.com/album/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://m.alltuu.com/album/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start",
       "world": "ISOLATED"
     },
     {
-      "matches": ["http://localhost:6606/*", "https://aperture-peach.vercel.app/*"],
-      "js": ["aperture.js"],
+      "matches": [
+        "http://localhost:6606/*",
+        "https://aperture-peach.vercel.app/*"
+      ],
+      "js": [
+        "aperture.js"
+      ],
       "run_at": "document_idle"
     }
   ]

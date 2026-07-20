@@ -26,9 +26,43 @@ function suggestFolder(title) {
   return ascii.length >= 3 ? ascii.slice(0, 40) : '';
 }
 
+// Alltuu albums open on the "popular" tab (menu=hot, ~50 photos). Force the
+// live feed so we harvest the whole album.
+function normalizeLive(u) {
+  try {
+    const url = new URL(u);
+    url.hash = '';
+    url.searchParams.set('menu', 'live');
+    return url.toString();
+  } catch (e) {
+    return u;
+  }
+}
+
+async function waitReady(tabId, ms = 15000) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    try { if (await chrome.tabs.sendMessage(tabId, { type: 'status' })) return true; } catch (e) {}
+    await sleep(500);
+  }
+  return false;
+}
+
 $('#harvest').onclick = async () => {
   $('#harvest').disabled = true;
   setBar(0);
+
+  // Make sure we're on the live feed (full album), not the ~50-photo popular
+  // tab — navigate the tab to menu=live first if needed.
+  const tab = await activeTab();
+  const live = tab && tab.url ? normalizeLive(tab.url) : null;
+  if (live && tab.url !== live) {
+    setStatus('Switching to live feed…');
+    await chrome.tabs.update(tab.id, { url: live });
+    await waitReady(tab.id);
+    await sleep(1500);
+  }
+
   setStatus('Entering live feed…');
   const en = await tabMsg('enter');
   if (en.error) { setStatus(en.error); $('#harvest').disabled = false; return; }
