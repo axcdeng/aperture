@@ -409,7 +409,12 @@ export function AlbumDetailClient({
   if (!ready) return null;
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+    <div
+      className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8"
+      data-aperture-album=""
+      data-album-slug={album.slug}
+      data-alltuu-album-url={album.sourceUrl ?? undefined}
+    >
       <Link
         href="/albums"
         className="mb-4 inline-flex items-center gap-1 text-xs text-muted hover:text-foreground"
@@ -1317,6 +1322,7 @@ function PhotoCard({
     <div
       draggable
       onDragStart={onDragStart}
+      data-original-filename={photo.originalFilename ?? undefined}
       className={cn(
         'group flex flex-col overflow-hidden rounded-lg border bg-surface transition-colors',
         selected ? 'border-foreground/40 ring-1 ring-foreground/20' : 'border-border hover:border-border-hover',

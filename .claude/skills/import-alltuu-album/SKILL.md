@@ -156,8 +156,14 @@ cd scripts && npm run import-album -- \
   --event "<matched name (verbatim) OR new clean name>" \
   --dir "../Albums/<folder>" \
   --tags "../Albums/<folder>/Sorted/tags.json" \
-  --date <YYYY-MM-DD> --location "<Location>"
+  --date <YYYY-MM-DD> --location "<Location>" \
+  --source-url "<the alltuu album URL>"
 ```
+
+Always pass `--source-url` with the original alltuu album link — it's stored on
+the event (`events.source_url`) and powers the site's "View full size" (fetches a
+fresh full-resolution original from that album on demand). Re-imports without the
+flag preserve the existing value.
 
 Suggest `--dry-run` first (it prints the resolved `slug` — verify it matches the
 intended existing album). `import-album` is idempotent (content-hash R2 keys +

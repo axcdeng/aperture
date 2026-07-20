@@ -213,10 +213,11 @@ async function main() {
   const dateArg = typeof args.date === 'string' ? args.date : undefined;
   const location = typeof args.location === 'string' ? args.location : null;
   const tagsArg = typeof args.tags === 'string' ? args.tags : undefined;
+  const sourceUrl = typeof args['source-url'] === 'string' ? args['source-url'] : null;
 
   if (!eventName || !dir) {
     console.error(
-      'Usage: npm run import-album -- --event "Name" --dir ./album [--date YYYY-MM-DD] [--location "..."] [--tags ./tags.txt] [--dry-run]',
+      'Usage: npm run import-album -- --event "Name" --dir ./album [--date YYYY-MM-DD] [--location "..."] [--tags ./tags.txt] [--source-url URL] [--dry-run]',
     );
     await pool.end().catch(() => {});
     process.exit(2);
@@ -256,14 +257,22 @@ async function main() {
   let coverFilename: string | null = null;
   if (dryRun) {
     eventId = 'DRYRUN';
-    console.log(`[import] (dry-run) event "${eventName}" slug=${slug}`);
+    console.log(`[import] (dry-run) event "${eventName}" slug=${slug}${sourceUrl ? ` source=${sourceUrl}` : ''}`);
   } else {
+    // Preserve an existing source_url on re-import unless a new one is passed —
+    // so re-running without --source-url never blanks it.
+    const eventUpdate: Partial<typeof schema.events.$inferInsert> = {
+      name: eventName,
+      date: eventDate,
+      location,
+    };
+    if (sourceUrl) eventUpdate.sourceUrl = sourceUrl;
     await db
       .insert(schema.events)
-      .values({ id: nanoid(12), name: eventName, slug, date: eventDate, location })
+      .values({ id: nanoid(12), name: eventName, slug, date: eventDate, location, sourceUrl })
       .onConflictDoUpdate({
         target: schema.events.slug,
-        set: { name: eventName, date: eventDate, location },
+        set: eventUpdate,
       });
     const [row] = await db
       .select({ id: schema.events.id, cover: schema.events.coverOriginalFilename })
