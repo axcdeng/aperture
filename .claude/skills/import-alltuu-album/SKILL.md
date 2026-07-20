@@ -108,19 +108,59 @@ changes to that skill; it makes its own downscaled working copies.
 
 ## Phase 4 — Upload to R2 (gated — ask first)
 
-Publishing is outward-facing: **ask the operator before uploading.** Pre-fill from
-`.harvest/meta.json`, but the raw title is Chinese — offer a clean English event
-name (that string becomes the event name and R2 slug). Then, from `scripts/`:
+### 4a. Reconcile with existing albums FIRST (never blind-create)
+
+An event may already be half-uploaded (e.g. you sorted part of it on an earlier
+day). `import-album` keys the album on `slug = slugify(--event)` and **upserts on
+that slug** — so reusing an existing album's *exact name* uploads INTO it, while a
+slightly different name silently creates a duplicate album. Always check before
+choosing a name.
+
+List what's already published (read-only, unauthenticated). `$APERTURE` is the
+deployed site base URL — **ask the operator for it if you don't have it**:
+
+```bash
+curl -s "$APERTURE/api/public/albums" | jq '.albums'
+# -> [{ slug, name, date, photoCount, taggedCount }, …]
+```
+
+Find likely matches to THIS album, using `.harvest/meta.json`:
+- **date** — compare each album's `date` to `meta.dateStart` (e.g. `2026-07-15`).
+- **name** — compare `name` against the album title / your suggested event name.
+
+Then **ask the operator**, showing any candidate with its `slug` and
+`photoCount` (a nonzero count is the tell-tale of a half-done upload):
+
+> Found an existing album that looks like this event: **"<name>"** (`<slug>`,
+> <photoCount> photos already). Upload into it, create a new album, or pick a
+> different one?
+
+- **Upload into the matched album** → set `--event` to that album's **exact
+  `name`** (verbatim, so `slugify` reproduces its `slug` and the upsert updates
+  it — no duplicate). Optionally confirm which files are new via
+  `curl -s "$APERTURE/api/public/albums/<slug>/sorted" | jq '.photos|keys'`.
+- **Create a new album** → pick a clean English event name (see below).
+- **Different album / not sure** → show the full `.albums` list and let them choose.
+
+If the list is empty or nothing plausibly matches, proceed as a new album.
+
+### 4b. Upload
+
+Publishing is outward-facing: **ask the operator before uploading.** For a new
+album, pre-fill from `.harvest/meta.json`, but the raw title is Chinese — offer a
+clean English event name (that string becomes the event name and R2 slug). For a
+matched album, use its existing name from 4a. Then, from `scripts/`:
 
 ```bash
 cd scripts && npm run import-album -- \
-  --event "<Clean Event Name>" \
+  --event "<matched name (verbatim) OR new clean name>" \
   --dir "../Albums/<folder>" \
   --tags "../Albums/<folder>/Sorted/tags.json" \
   --date <YYYY-MM-DD> --location "<Location>"
 ```
 
-Suggest `--dry-run` first. `import-album` is idempotent (content-hash R2 keys +
+Suggest `--dry-run` first (it prints the resolved `slug` — verify it matches the
+intended existing album). `import-album` is idempotent (content-hash R2 keys +
 HeadObject skip) and mirrors 1080px + 480px WebP to R2 while writing Postgres.
 `tags.json` is consumed natively — pass `--tags` explicitly because our nested
 `Albums/<folder>/Sorted/` path isn't in the importer's auto-discovery list.
@@ -134,5 +174,6 @@ HeadObject skip) and mirrors 1080px + 480px WebP to R2 while writing Postgres.
 | Downloading `ol` originals by default | Default `sl` (1600px) is enough; `--field ol` only on request. |
 | A 403 body saved as a `.JPG` | `download.sh` validates JPEG magic and discards it — never bypass that. |
 | Uploading without asking | Phase 4 is gated. Confirm event name + R2 slug first. |
+| Blind-creating a duplicate album for a half-uploaded event | Phase 4a: list `/api/public/albums`, match by date+name, reuse the matched album's exact name so the slug upserts. |
 | Putting the Chinese title in the R2 slug unintentionally | Offer a clean English `--event` name. |
 | Stale signatures mid-download | Re-run Phase 1 to re-sign, then Phase 2. |
