@@ -7,6 +7,9 @@
 
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
+// albumId -> background tabId currently harvesting (dedupe concurrent opens).
+const harvestTabs = {};
+
 function folderRegex(folder) {
   // Match ".../<folder>/<basename>" on both / and \ path separators.
   return new RegExp('[\\\\/]' + escapeRe(folder) + '[\\\\/]([^\\\\/]+)$');
@@ -75,6 +78,27 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === 'progress') {
     progress(msg.folder, msg.total || 0).then(sendResponse);
+    return true;
+  }
+  // --- View-full-size harvest tab lifecycle --------------------------------
+  // aperture.js asks us to open the linked alltuu album in a background tab; its
+  // content script harvests + writes the cache to chrome.storage itself, then
+  // pings 'harvestDone' so we can close the tab. aperture.js reads the cache by
+  // polling storage, so this is best-effort tab management, not the data path.
+  if (msg.type === 'openHarvestTab') {
+    if (!harvestTabs[msg.albumId]) {
+      const url = msg.url.split('#')[0] + '#__aph';
+      chrome.tabs.create({ url, active: false }, (tab) => {
+        if (tab) harvestTabs[msg.albumId] = tab.id;
+      });
+    }
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (msg.type === 'harvestDone') {
+    const tabId = harvestTabs[msg.albumId];
+    if (tabId) { chrome.tabs.remove(tabId, () => void chrome.runtime.lastError); delete harvestTabs[msg.albumId]; }
+    sendResponse({ ok: true });
     return true;
   }
 });

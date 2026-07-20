@@ -1,10 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Alltuu Album Fast Downloader",
-  "version": "1.0.0",
-  "description": "Harvest an alltuu / piufoto album's live feed and bulk-download every photo in parallel — no agent, no tokens.",
-  "permissions": ["downloads", "tabs"],
-  "host_permissions": ["https://m.alltuu.com/*", "https://*.alltuu.com/*"],
+  "version": "1.1.0",
+  "description": "Bulk-download an alltuu/piufoto album in parallel, and add a 'View full size' button to Aperture album photos — no agent, no tokens.",
+  "permissions": ["downloads", "tabs", "storage"],
+  "host_permissions": [
+    "https://m.alltuu.com/*",
+    "https://*.alltuu.com/*",
+    "http://localhost:6606/*"
+  ],
   "background": { "service_worker": "background.js" },
   "action": {
     "default_popup": "popup.html",
@@ -22,6 +26,11 @@
       "js": ["content.js"],
       "run_at": "document_start",
       "world": "ISOLATED"
+    },
+    {
+      "matches": ["http://localhost:6606/*"],
+      "js": ["aperture.js"],
+      "run_at": "document_idle"
     }
   ]
 }

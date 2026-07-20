@@ -51,3 +51,31 @@ Then ask the agent to run the tagging phase (and R2 upload) on `Albums/WRCT_Beij
   same folder (files you deleted or downloaded elsewhere won't be known). For
   exact disk-based resume, use the skill's `download.sh` instead.
 - Extensions can only write under `~/Downloads/`, hence the move step above.
+
+## "View full size" on the Aperture site
+
+The extension also adds a **View full size** button to each photo tile on your
+Aperture album pages. Clicking it opens that photo's 4000px original from the
+linked alltuu album.
+
+How it works:
+- Each Aperture album stores its alltuu album URL (`events.source_url`, set at
+  import via `--source-url`). The album page exposes it as `data-alltuu-album-url`
+  and each tile as `data-original-filename`.
+- On the first click for an album, the extension opens that alltuu album in a
+  background tab, harvests the `filename → original-URL` map, and caches it in
+  `chrome.storage` for ~25 days (bounded by the OSS signature lifetime). That
+  first click takes ~30s ("Preparing…"); every click after is instant until the
+  cache expires, then it re-harvests automatically.
+
+### Enabling it on your deployed site
+
+By default the Aperture content script only runs on `http://localhost:6606/*`
+(local dev). To use it on your live site, add your domain in **two** places in
+`manifest.json`, then reload the extension:
+
+1. `host_permissions`: add `"https://your-aperture-domain/*"`
+2. the last `content_scripts` entry's `matches`: add `"https://your-aperture-domain/*"`
+
+(Requires the site to be running the `source_url` changes so the album pages
+carry `data-alltuu-album-url` / `data-original-filename`.)
