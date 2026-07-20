@@ -4,7 +4,7 @@
 # Field tiers (from the harvest manifest): bl=1600px medium (default),
 # url1920=1620x1080, ol=4000px original. Skips filenames already in
 # <target-dir>; validates each body is a JPEG; writes atomically.
-# Prints: downloaded=<d> skipped=<s> failed=<f>
+# Prints: downloaded=<d> skipped=<s> failed=<f> invalid=<i> total=<t>
 set -u
 
 URLS="${1:?usage: download.sh <urls.json> <target-dir> [-j N] [--field FIELD]}"
@@ -21,11 +21,20 @@ while [ $# -gt 0 ]; do
 done
 mkdir -p "$DIR"
 
+# Scratch files + cleanup. Arm the trap immediately after creating them (before
+# any step that could exit under `set -u`), and sweep any stale per-file temps
+# left by a previously killed run.
+EXISTING="$(mktemp)"; TODO="$(mktemp)"; RESULTS="$(mktemp)"
+trap 'rm -f "$TODO" "$RESULTS" "$EXISTING"; rm -f "$DIR"/.dl.*' EXIT
+rm -f "$DIR"/.dl.* 2>/dev/null || true
+
 # Extract "<filename>\t<url>" lines for the chosen field. Prefer jq; fall back
-# to a python one-liner so the script has no hard jq dependency.
+# to a python one-liner so the script has no hard jq dependency. BOTH paths must
+# skip entries missing `n` or the chosen field — otherwise jq would emit the
+# literal "null" as a URL and manufacture a spurious download failure.
 extract() {
   if command -v jq >/dev/null 2>&1; then
-    jq -r --arg f "$FIELD" '.[] | "\(.n)\t\(.[$f])"' "$URLS"
+    jq -r --arg f "$FIELD" '.[] | select(.n and .[$f]) | "\(.n)\t\(.[$f])"' "$URLS"
   else
     python3 - "$URLS" "$FIELD" <<'PY'
 import json,sys
@@ -36,20 +45,24 @@ PY
   fi
 }
 
-# Build skip-set from files already on disk. (Plain file + grep instead of an
-# associative array: macOS ships bash 3.2, which lacks `declare -A`.)
-EXISTING="$(mktemp)"
+# Build skip-set from files already on disk.
 if [ -d "$DIR" ]; then
   (cd "$DIR" && ls -1 2>/dev/null) > "$EXISTING"
 fi
 
 # TODO is NUL-delimited name/url pairs (not tab-delimited lines) so it can be
 # fed to `xargs -0 -n2` below without going through -I{}'s replstr path.
-TODO="$(mktemp)"
-skipped=0; total=0
+skipped=0; total=0; invalid=0
 while IFS="$(printf '\t')" read -r name url; do
   [ -n "$name" ] || continue
   total=$((total+1))
+  # `name` is provider-controlled JSON. It becomes a filesystem path below, so
+  # reject anything that is not a plain basename (no slashes, no `..`, no
+  # leading dash, allowlisted chars only). Report rather than silently fail.
+  case "$name" in
+    .|..|-*|*/*|*..*|*[!A-Za-z0-9._-]*)
+      invalid=$((invalid+1)); echo "INVALID name skipped: $name" >&2; continue;;
+  esac
   if grep -Fxq "$name" "$EXISTING" 2>/dev/null; then
     skipped=$((skipped+1)); continue
   fi
@@ -73,8 +86,6 @@ fetch_one() {
 }
 export -f fetch_one
 
-RESULTS="$(mktemp)"
-trap 'rm -f "$TODO" "$RESULTS" "$EXISTING"' EXIT
 if [ -s "$TODO" ]; then
   # -P<JOBS> concurrency. NUL-delimited, 2 items (name,url) per invocation:
   # avoids `xargs -I{}` entirely, whose replstr substitution is capped at 255
@@ -88,6 +99,6 @@ fi
 # so a naive `|| echo 0` fallback would append a spurious second "0" line.
 downloaded="$(grep -c '^OK' "$RESULTS" 2>/dev/null)"; downloaded="${downloaded:-0}"
 failed="$(grep -c '^FAIL' "$RESULTS" 2>/dev/null)"; failed="${failed:-0}"
-echo "downloaded=$downloaded skipped=$skipped failed=$failed total=$total"
+echo "downloaded=$downloaded skipped=$skipped failed=$failed invalid=$invalid total=$total"
 if [ "$failed" -gt 0 ]; then echo "failures:"; grep '^FAIL' "$RESULTS" | cut -f2; fi
 exit 0
