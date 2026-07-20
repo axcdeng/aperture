@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Alltuu Album Fast Downloader",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Bulk-download an alltuu/piufoto album in parallel, and add a 'View full size' button to Aperture album photos \u2014 no agent, no tokens.",
   "permissions": [
     "downloads",

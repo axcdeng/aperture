@@ -176,6 +176,26 @@
   };
   window.addEventListener('aperture:bulk-download', onBulkDownload);
 
+  // The lightbox "High quality" toggle asks for a single photo's full-size URL.
+  // Reply with the alltuu original from the index (harvesting once if needed).
+  const onResolveHq = async (e) => {
+    let d; try { d = JSON.parse(e.detail); } catch { return; }
+    const filename = d && d.filename, reqId = d && d.reqId;
+    if (!filename || !reqId) return;
+    const reply = (url) =>
+      window.dispatchEvent(new CustomEvent('aperture:hq-url', { detail: JSON.stringify({ reqId, url: url || null }) }));
+    refreshCtx();
+    let c = await readFresh();
+    let url = c ? lookup(c.map, filename) : null;
+    if (!url && !harvestedThisView) {
+      harvestedThisView = true;
+      c = await runHarvest();
+      url = c ? lookup(c.map, filename) : null;
+    }
+    reply(url);
+  };
+  window.addEventListener('aperture:resolve-hq', onResolveHq);
+
   let scanQueued = false;
   const scan = () => {
     scanQueued = false;

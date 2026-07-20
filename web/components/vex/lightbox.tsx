@@ -16,6 +16,37 @@ import { SourceBadge } from './source-badge';
 import { SeasonBadge } from './season-badge';
 import { ContentTypeBadge } from './content-type-badge';
 
+// Ask the Alltuu Downloader extension for a photo's full-size original URL.
+// Resolves null if the extension isn't installed or the photo isn't in the
+// linked alltuu album. The extension may need to harvest the album first
+// (~40s the first time), hence the long timeout.
+function resolveHqUrl(filename: string, timeoutMs = 140000): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (typeof document === 'undefined' ||
+        document.documentElement.getAttribute('data-aperture-ext') !== '1') {
+      resolve(null);
+      return;
+    }
+    const reqId = 'hq' + Date.now() + Math.random().toString(36).slice(2);
+    let done = false;
+    const finish = (url: string | null) => {
+      if (done) return;
+      done = true;
+      window.removeEventListener('aperture:hq-url', onReply as EventListener);
+      resolve(url);
+    };
+    const onReply = (e: Event) => {
+      let d: { reqId?: string; url?: string | null };
+      try { d = JSON.parse((e as CustomEvent).detail); } catch { return; }
+      if (d.reqId !== reqId) return;
+      finish(d.url ?? null);
+    };
+    window.addEventListener('aperture:hq-url', onReply as EventListener);
+    window.dispatchEvent(new CustomEvent('aperture:resolve-hq', { detail: JSON.stringify({ filename, reqId }) }));
+    setTimeout(() => finish(null), timeoutMs);
+  });
+}
+
 export function Lightbox({
   items,
   activeId,
@@ -30,6 +61,35 @@ export function Lightbox({
   const idx = activeId ? items.findIndex((m) => m.id === activeId) : -1;
   const item = idx >= 0 ? items[idx] : null;
   const [zoom, setZoom] = useState(false);
+  const [hq, setHq] = useState(false);
+  const [hqUrl, setHqUrl] = useState<string | null>(null);
+  const [hqStatus, setHqStatus] = useState<'idle' | 'loading' | 'ready' | 'error' | 'noext'>('idle');
+
+  // Restore the sticky High-quality preference.
+  useEffect(() => {
+    setHq(localStorage.getItem('aperture:hq') === '1');
+  }, []);
+  const toggleHq = (on: boolean) => {
+    setHq(on);
+    try { localStorage.setItem('aperture:hq', on ? '1' : '0'); } catch {}
+  };
+
+  // Resolve the full-size URL when High quality is on for an image. Re-runs per
+  // photo; cleared on change so we never show the previous photo's original.
+  const activeFilename = item?.originalFilename;
+  const isImage = item?.contentType === 'image';
+  useEffect(() => {
+    setHqUrl(null);
+    if (!hq || !isImage || !activeFilename) { setHqStatus('idle'); return; }
+    if (document.documentElement.getAttribute('data-aperture-ext') !== '1') { setHqStatus('noext'); return; }
+    let cancelled = false;
+    setHqStatus('loading');
+    resolveHqUrl(activeFilename).then((url) => {
+      if (cancelled) return;
+      if (url) { setHqUrl(url); setHqStatus('ready'); } else setHqStatus('error');
+    });
+    return () => { cancelled = true; };
+  }, [hq, isImage, activeFilename]);
 
   const next = useCallback(() => {
     if (idx < 0) return;
@@ -113,14 +173,25 @@ export function Lightbox({
         >
           {item.contentType === 'image' ? (
             <div className="relative h-[80vh] w-full">
-              <Image
-                src={item.fullUrl}
-                alt={item.title ?? 'Media'}
-                fill
-                sizes="80vw"
-                className="object-contain"
-                priority
-              />
+              {hq && hqUrl ? (
+                // Full-size original from the linked alltuu album (external host,
+                // full resolution) — a plain img, not next/image's optimizer.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={hqUrl}
+                  alt={item.title ?? 'Media'}
+                  className="absolute inset-0 h-full w-full object-contain"
+                />
+              ) : (
+                <Image
+                  src={item.fullUrl}
+                  alt={item.title ?? 'Media'}
+                  fill
+                  sizes="80vw"
+                  className="object-contain"
+                  priority
+                />
+              )}
             </div>
           ) : item.contentType === 'video' ? (
             <video
@@ -147,6 +218,33 @@ export function Lightbox({
 
       {/* Side panel */}
       <aside className="w-full shrink-0 overflow-y-auto border-t border-border bg-surface px-4 py-4 sm:w-96 sm:border-l sm:border-t-0 sm:px-5 sm:py-6">
+        {item.contentType === 'image' ? (
+          <div className="mb-3">
+            <div className="flex items-center gap-1 rounded-md border border-border p-0.5 text-xs">
+              <button
+                onClick={() => toggleHq(false)}
+                className={cn('flex-1 rounded px-2 py-1 transition-colors', !hq ? 'bg-surface-2 font-medium text-foreground' : 'text-muted-2 hover:text-foreground')}
+              >
+                Default view
+              </button>
+              <button
+                onClick={() => toggleHq(true)}
+                className={cn('flex-1 rounded px-2 py-1 transition-colors', hq ? 'bg-surface-2 font-medium text-foreground' : 'text-muted-2 hover:text-foreground')}
+              >
+                High quality
+              </button>
+            </div>
+            {hq ? (
+              <p className="mt-1.5 text-[11px] text-muted-2">
+                {hqStatus === 'loading' ? 'Loading full-size… (first time per album can take ~40s)'
+                  : hqStatus === 'ready' ? 'Showing full-size original.'
+                  : hqStatus === 'noext' ? 'Install the Alltuu Downloader extension to use this.'
+                  : hqStatus === 'error' ? 'No full-size original for this photo.'
+                  : ''}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         <div className="flex items-center gap-2 mb-3">
           {item.teamNumber ? (
             <TeamNumber number={item.teamNumber} size="lg" />
