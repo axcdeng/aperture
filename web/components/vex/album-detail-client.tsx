@@ -115,9 +115,37 @@ export function AlbumDetailClient({
     } catch {
       /* ignore */
     }
+    // URL query params (shareable links) take precedence over the persisted view.
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const uv = sp.get('view');
+      if (uv === 'team' || uv === 'tag' || uv === 'default') setView(uv);
+      const uf = sp.get('folder');
+      if (uf) setFolderId(uf);
+      const ut = sp.get('tag');
+      if (ut) setActiveTag(ut);
+      const uq = sp.get('q');
+      if (uq) setQuery(uq);
+    } catch {
+      /* ignore */
+    }
     setReady(true);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
+
+  // Reflect folder / view / tag / search in the URL so the current spot is
+  // shareable and survives reload. Uses history.replaceState (not the Next
+  // router) to avoid re-running the server component / refetching the album.
+  useEffect(() => {
+    if (!ready) return;
+    const sp = new URLSearchParams();
+    if (view !== 'default') sp.set('view', view);
+    if (folderId) sp.set('folder', folderId);
+    if (activeTag) sp.set('tag', activeTag);
+    if (query) sp.set('q', query);
+    const qs = sp.toString();
+    window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
+  }, [ready, view, folderId, activeTag, query]);
 
   function changeView(v: 'default' | 'team' | 'tag') {
     setView(v);
