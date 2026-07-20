@@ -13,6 +13,7 @@
   let albumUrl = null;
   let albumId = null;
   let cacheKey = null;
+  let harvestedThisView = false; // did we run a full harvest for this album already?
 
   // (Re)resolve which album this page is currently showing. Returns false when
   // the album root / its alltuu URL isn't in the DOM yet (still rendering, or a
@@ -25,6 +26,7 @@
       albumUrl = u;
       albumId = (u.match(/[a-f0-9]{32}/i) || [u])[0];
       cacheKey = 'album:' + albumId;
+      harvestedThisView = false; // new album (or SPA nav) → allow one harvest
     }
     return true;
   }
@@ -36,12 +38,6 @@
     }));
 
   const clearCache = () => new Promise((res) => chrome.storage.local.remove(cacheKey, res));
-
-  // How many photos the page shows — a good harvest should cover ~all of them.
-  // A cache with far fewer entries is a partial harvest (e.g. the old bug where
-  // a throttled background tab captured only the first page) → re-harvest.
-  const pageTileCount = () => document.querySelectorAll('[data-original-filename]').length;
-  const isComplete = (c) => !!c && c.count >= Math.max(1, Math.floor(pageTileCount() * 0.8));
 
   // Trigger a fresh harvest and poll storage for the result — polling (not a
   // message response) so it survives the service worker being suspended.
@@ -73,11 +69,14 @@
     let c = await readFresh();
     let url = c ? lookup(c.map, filename) : null;
 
-    // Re-harvest when there's no cache, the cache is a partial harvest, or the
-    // photo is missing from an incomplete cache. A miss against a COMPLETE
-    // cache is a genuine not-found (don't loop re-harvesting).
-    if (!url && !isComplete(c)) {
+    // Miss → run a full harvest once per album view (the cached map may be
+    // absent, expired, or a partial capture from the old throttled-tab bug —
+    // the page grid is virtualized so we can't judge completeness from the DOM).
+    // The once-per-view guard stops a genuinely-absent photo from re-harvesting
+    // on every click.
+    if (!url && !harvestedThisView) {
       btn.textContent = 'Preparing…';
+      harvestedThisView = true;
       c = await runHarvest((s) => { btn.textContent = 'Preparing… ' + s + 's'; });
       url = c ? lookup(c.map, filename) : null;
     }
