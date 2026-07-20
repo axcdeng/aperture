@@ -7,8 +7,18 @@
 
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-// albumId -> background tabId currently harvesting (dedupe concurrent opens).
-const harvestTabs = {};
+// Close (and forget) the harvest window for an album. Robust to the service
+// worker having been suspended: the window id lives in chrome.storage, not just
+// memory.
+function closeHarvest(albumId) {
+  const key = 'harvestWin:' + albumId;
+  chrome.storage.local.get(key, (o) => {
+    if (o[key] != null) {
+      chrome.windows.remove(o[key], () => void chrome.runtime.lastError);
+      chrome.storage.local.remove(key);
+    }
+  });
+}
 
 // Alltuu albums open on the "popular" tab (menu=hot, ~50 photos). Force the
 // live feed (menu=live) so we harvest the whole album. Also drops any hash.
@@ -93,25 +103,41 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     progress(msg.folder, msg.total || 0).then(sendResponse);
     return true;
   }
-  // --- View-full-size harvest tab lifecycle --------------------------------
-  // aperture.js asks us to open the linked alltuu album in a background tab; its
-  // content script harvests + writes the cache to chrome.storage itself, then
-  // pings 'harvestDone' so we can close the tab. aperture.js reads the cache by
-  // polling storage, so this is best-effort tab management, not the data path.
+  // --- View-full-size harvest window lifecycle -----------------------------
+  // aperture.js asks us to open the linked alltuu album; its content script
+  // (autoHarvest) scrolls the live feed, writes the filename→original map to
+  // chrome.storage, then pings 'harvestDone' so we close the window. aperture.js
+  // reads the cache by polling storage — this is just window management.
+  //
+  // IMPORTANT: a *focused popup window*, not a background tab. Chrome throttles
+  // hidden/background tabs (paused rAF, deprioritized rendering), so the album's
+  // scroll-driven lazy-load never fires and only the first page is captured. A
+  // focused window's active tab is not throttled, so the whole album loads.
   if (msg.type === 'openHarvestTab') {
-    if (!harvestTabs[msg.albumId]) {
-      // Force the live feed (full album), not the ~50-photo popular tab.
-      const url = normalizeLive(msg.url) + '#__aph';
-      chrome.tabs.create({ url, active: false }, (tab) => {
-        if (tab) harvestTabs[msg.albumId] = tab.id;
+    const key = 'harvestWin:' + msg.albumId;
+    const url = normalizeLive(msg.url) + '#__aph';
+    chrome.storage.local.get(key, (o) => {
+      const open = () => chrome.windows.create(
+        { url, type: 'popup', focused: true, width: 520, height: 700 },
+        (win) => {
+          if (win) {
+            chrome.storage.local.set({ [key]: win.id });
+            // Safety net: close after 100s if harvestDone never arrives.
+            setTimeout(() => closeHarvest(msg.albumId), 100000);
+          }
+        },
+      );
+      if (o[key] == null) { open(); return; }
+      // A window id is on record — reuse it only if it still exists.
+      chrome.windows.get(o[key], {}, (w) => {
+        if (chrome.runtime.lastError || !w) open();
       });
-    }
+    });
     sendResponse({ ok: true });
     return true;
   }
   if (msg.type === 'harvestDone') {
-    const tabId = harvestTabs[msg.albumId];
-    if (tabId) { chrome.tabs.remove(tabId, () => void chrome.runtime.lastError); delete harvestTabs[msg.albumId]; }
+    closeHarvest(msg.albumId);
     sendResponse({ ok: true });
     return true;
   }

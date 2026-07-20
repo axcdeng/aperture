@@ -29,43 +29,63 @@
     return true;
   }
 
-  const readCache = () =>
-    new Promise((res) => chrome.storage.local.get(cacheKey, (o) => res(o[cacheKey] || null)));
+  const readFresh = () =>
+    new Promise((res) => chrome.storage.local.get(cacheKey, (o) => {
+      const c = o[cacheKey];
+      res(c && c.expires > Date.now() ? c : null);
+    }));
 
-  const freshMap = async () => {
-    const c = await readCache();
-    return c && c.expires > Date.now() ? c.map : null;
-  };
+  const clearCache = () => new Promise((res) => chrome.storage.local.remove(cacheKey, res));
 
-  // Ask the background worker to harvest, then poll storage for the result —
-  // polling (not a message response) so it survives the service worker being
-  // suspended mid-harvest.
-  const ensureHarvest = async (onProgress) => {
-    let map = await freshMap();
-    if (map) return map;
+  // How many photos the page shows — a good harvest should cover ~all of them.
+  // A cache with far fewer entries is a partial harvest (e.g. the old bug where
+  // a throttled background tab captured only the first page) → re-harvest.
+  const pageTileCount = () => document.querySelectorAll('[data-original-filename]').length;
+  const isComplete = (c) => !!c && c.count >= Math.max(1, Math.floor(pageTileCount() * 0.8));
+
+  // Trigger a fresh harvest and poll storage for the result — polling (not a
+  // message response) so it survives the service worker being suspended.
+  const runHarvest = async (onProgress) => {
+    await clearCache();
     chrome.runtime.sendMessage({ type: 'openHarvestTab', url: albumUrl, albumId });
     const started = Date.now();
-    while (Date.now() - started < 120000) {
+    while (Date.now() - started < 150000) {
       await new Promise((r) => setTimeout(r, 1200));
-      map = await freshMap();
-      if (map) return map;
+      const c = await readFresh();
+      if (c) return c;
       if (onProgress) onProgress(Math.round((Date.now() - started) / 1000));
     }
     return null;
   };
 
+  // Exact match, then case-insensitive (the site's stored filename and alltuu's
+  // `n` can differ in case, e.g. .JPG vs .jpg).
+  const lookup = (map, filename) => {
+    if (!map) return null;
+    if (map[filename]) return map[filename];
+    const lc = filename.toLowerCase();
+    for (const k in map) if (k.toLowerCase() === lc) return map[k];
+    return null;
+  };
+
   const openFull = async (filename, btn) => {
     const label = btn.textContent;
-    let map = await freshMap();
-    if (!map) {
+    let c = await readFresh();
+    let url = c ? lookup(c.map, filename) : null;
+
+    // Re-harvest when there's no cache, the cache is a partial harvest, or the
+    // photo is missing from an incomplete cache. A miss against a COMPLETE
+    // cache is a genuine not-found (don't loop re-harvesting).
+    if (!url && !isComplete(c)) {
       btn.textContent = 'Preparing…';
-      map = await ensureHarvest((s) => { btn.textContent = 'Preparing… ' + s + 's'; });
+      c = await runHarvest((s) => { btn.textContent = 'Preparing… ' + s + 's'; });
+      url = c ? lookup(c.map, filename) : null;
     }
     btn.textContent = label;
-    const url = map && map[filename];
+
     if (!url) {
       btn.textContent = 'not found';
-      setTimeout(() => { btn.textContent = label; }, 2000);
+      setTimeout(() => { btn.textContent = label; }, 2200);
       return;
     }
     window.open(url, '_blank', 'noopener');
