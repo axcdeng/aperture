@@ -48,14 +48,32 @@ Albums/<folder>/Sorted/tags.json     ← written by the tagging skill
    **热门 (hot)** tab is a curated subset (~99) — do not harvest from it.
 4. `javascript_tool`: eval the entire contents of this skill's `harvest.js`.
    Expect `"installed"`.
-5. Loop up to ~40 times, one `javascript_tool` call each:
+5. Loop up to ~40 times, a few scroll steps per `javascript_tool` call:
    ```js
-   (async () => { window.__harvestScroll(); await new Promise(r=>setTimeout(r,700)); return window.__harvestStatus(); })()
+   (async () => { for (let i=0;i<6;i++){ window.__harvestScroll(); await new Promise(r=>setTimeout(r,750)); } return window.__harvestStatus(); })()
    ```
-   Stop when `growingRounds >= 2` (count stable two rounds running).
-6. `javascript_tool`: `window.__harvestDump()` → parse the JSON string.
-7. Write `photos` → `Albums/<folder>/.harvest/urls.json` and `meta` →
-   `Albums/<folder>/.harvest/meta.json`.
+   Stop when `growingRounds >= 2` (count stable two rounds running). A large
+   album grows +60/round into the thousands — keep going until it plateaus.
+6. **Write the manifest to disk without routing it through your context.** The
+   dump can be 100s of KB of signed URLs — do NOT return it from `javascript_tool`.
+   Instead run this skill's one-shot receiver and have the page POST to it:
+   ```bash
+   mkdir -p Albums/<folder>/.harvest
+   python3 .claude/skills/import-alltuu-album/recv.py \
+     "$(pwd)/Albums/<folder>/.harvest/urls.json" &   # run in background
+   ```
+   Then one `javascript_tool` call:
+   ```js
+   (async () => {
+     const photos = [...window.__HARVEST.values()];
+     const r = await fetch('http://127.0.0.1:8799/', {method:'POST', headers:{'Content-Type':'text/plain'}, body: JSON.stringify(photos)});
+     return 'status='+r.status+' count='+photos.length;
+   })()
+   ```
+   The receiver writes `urls.json` and exits. (If the browser can't reach
+   localhost, fall back to `window.__harvestDump()` in chunks.)
+7. Capture album meta once (small enough to return directly): `javascript_tool`
+   → `JSON.parse(window.__harvestDump()).meta` → write `Albums/<folder>/.harvest/meta.json`.
 
 If `photos.length` is 0 after entering the live feed, **stop** and ask the
 operator to open the album in a browser themselves first, then retry — some
@@ -74,10 +92,11 @@ rest with 6 workers, validates each is a real JPEG (a 403 HTML body is discarded
 never saved as `.JPG`), and prints `downloaded=… skipped=… failed=… total=…`.
 
 - `-j N` changes worker count (default 6; 3–8 all safe on the OSS backend).
-- Downloads the **`sl` 1600px tier** (~0.5–1 MB) by default — enough for the
+- Downloads the **`bl` 1600px tier** (~0.5–1 MB) by default — enough for the
   site (import-album downscales to 1080px WebP) and for plate-reading (tagging
-  downscales to 1280px). Add `--field ol` only if the operator wants the 5.6 MB
-  camera originals.
+  downscales to 1280px). Field tiers: `bl`=1600px (default), `url1920`=1620×1080,
+  `ol`=4000px original. Add `--field ol` only if the operator wants the 5.6 MB
+  camera originals. (Note: the live-feed `sl` field is only 720px — never use it.)
 - If any `failed` line is a 403 / expired signature, the harvest signatures
   aged out — re-run **Phase 1** to re-sign, then Phase 2 again.
 

@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # Parallel downloader for an alltuu/piufoto album manifest.
-# Usage: download.sh <urls.json> <target-dir> [-j N] [--field sl|ol|url1920]
-# Skips filenames already in <target-dir>; validates each body is a JPEG;
-# writes atomically. Prints: downloaded=<d> skipped=<s> failed=<f>
+# Usage: download.sh <urls.json> <target-dir> [-j N] [--field bl|url1920|ol]
+# Field tiers (from the harvest manifest): bl=1600px medium (default),
+# url1920=1620x1080, ol=4000px original. Skips filenames already in
+# <target-dir>; validates each body is a JPEG; writes atomically.
+# Prints: downloaded=<d> skipped=<s> failed=<f>
 set -u
 
 URLS="${1:?usage: download.sh <urls.json> <target-dir> [-j N] [--field FIELD]}"
 DIR="${2:?usage: download.sh <urls.json> <target-dir> [-j N] [--field FIELD]}"
 shift 2 || true
 JOBS=6
-FIELD=sl
+FIELD=bl
 while [ $# -gt 0 ]; do
   case "$1" in
     -j) JOBS="$2"; shift 2;;

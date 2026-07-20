@@ -3,16 +3,25 @@
 // lazy-loads it, so we never fight the server-side page signing.
 (function () {
   if (window.__HARVEST) return 'already installed; count=' + window.__HARVEST.size;
-  window.__HARVEST = new Map();          // n -> {n, sl, os, w, h}
+  window.__HARVEST = new Map();          // n -> {n, bl, url1920, ol, os, w, h}
   window.__harvestPrev = -1;
   window.__harvestRounds = 0;
 
+  // Capture the useful resolution tiers by their SEMANTIC field, not `sl`:
+  // the meaning of `sl` differs by endpoint (1600px on the "hot" tab, but only
+  // 720px on the 图片直播 live feed we harvest from). Consistent across both:
+  //   bl      = uib/ml/  → 1600px medium   (default download tier, plate-readable)
+  //   url1920 = uip/     → 1620×1080 q90
+  //   ol      = uio/     → 4000px true original (~5.6 MB)
   const ingest = (text) => {
     let j; try { j = JSON.parse(text); } catch { return; }
     const d = j && j.d;
     if (!Array.isArray(d)) return;
     for (const p of d) {
-      if (p && p.n && p.sl) window.__HARVEST.set(p.n, { n: p.n, sl: p.sl, os: p.os, w: p.w, h: p.h });
+      const url = p && (p.bl || p.url1920 || p.ol || p.sl);
+      if (p && p.n && url) {
+        window.__HARVEST.set(p.n, { n: p.n, bl: p.bl, url1920: p.url1920, ol: p.ol, os: p.os, w: p.w, h: p.h });
+      }
     }
   };
 
