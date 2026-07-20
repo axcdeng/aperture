@@ -528,6 +528,7 @@ export async function listAlbums(): Promise<AlbumSummary[]> {
       date: e.date?.toISOString(),
       location: e.location ?? undefined,
       note: e.note ?? undefined,
+      sourceUrl: e.sourceUrl ?? undefined,
       coverUrl: r2PublicUrl(cover?.r2Key ?? cover?.r2FullKey) ?? undefined,
       photoCount: Number(agg?.photoCount ?? 0),
       teamCount: Number(agg?.teamCount ?? 0),

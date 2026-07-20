@@ -64,6 +64,8 @@ export interface AlbumSummary {
   location?: string;
   note?: string;
   coverUrl?: string;
+  /** Public URL of the source album (e.g. the alltuu/piufoto link), if imported from one. */
+  sourceUrl?: string;
   photoCount: number;
   teamCount: number;
 }

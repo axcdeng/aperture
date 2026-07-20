@@ -48,6 +48,11 @@ export const events = pgTable(
     // rows are soft-deletable/replaceable on re-import, so a row FK would
     // dangle. Resolved to whichever live row exists at query time.
     coverOriginalFilename: text('cover_original_filename'),
+    // Public URL of the source album this event was imported from (e.g. the
+    // alltuu/piufoto album link). Stable and re-openable; lets a client fetch
+    // fresh full-resolution originals on demand. Nullable — Discord/YouTube
+    // media and older imports have none.
+    sourceUrl: text('source_url'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [uniqueIndex('events_slug_idx').on(t.slug)],
