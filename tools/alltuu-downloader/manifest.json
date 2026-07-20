@@ -7,7 +7,8 @@
   "host_permissions": [
     "https://m.alltuu.com/*",
     "https://*.alltuu.com/*",
-    "http://localhost:6606/*"
+    "http://localhost:6606/*",
+    "https://aperture-peach.vercel.app/*"
   ],
   "background": { "service_worker": "background.js" },
   "action": {
@@ -28,7 +29,7 @@
       "world": "ISOLATED"
     },
     {
-      "matches": ["http://localhost:6606/*"],
+      "matches": ["http://localhost:6606/*", "https://aperture-peach.vercel.app/*"],
       "js": ["aperture.js"],
       "run_at": "document_idle"
     }

@@ -68,14 +68,14 @@ How it works:
   first click takes ~30s ("Preparing…"); every click after is instant until the
   cache expires, then it re-harvests automatically.
 
-### Enabling it on your deployed site
+### Where it runs
 
-By default the Aperture content script only runs on `http://localhost:6606/*`
-(local dev). To use it on your live site, add your domain in **two** places in
-`manifest.json`, then reload the extension:
+The Aperture content script is configured for `http://localhost:6606/*` (local
+dev) and `https://aperture-peach.vercel.app/*` (production). To add another
+domain, put it in **two** places in `manifest.json`, then reload the extension:
 
-1. `host_permissions`: add `"https://your-aperture-domain/*"`
-2. the last `content_scripts` entry's `matches`: add `"https://your-aperture-domain/*"`
+1. `host_permissions`: add `"https://your-domain/*"`
+2. the last `content_scripts` entry's `matches`: add `"https://your-domain/*"`
 
 (Requires the site to be running the `source_url` changes so the album pages
 carry `data-alltuu-album-url` / `data-original-filename`.)
