@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Alltuu Album Fast Downloader",
+  "version": "1.0.0",
+  "description": "Harvest an alltuu / piufoto album's live feed and bulk-download every photo in parallel — no agent, no tokens.",
+  "permissions": ["downloads", "tabs"],
+  "host_permissions": ["https://m.alltuu.com/*", "https://*.alltuu.com/*"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Alltuu Album Downloader"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://m.alltuu.com/album/*"],
+      "js": ["hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://m.alltuu.com/album/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    }
+  ]
+}
